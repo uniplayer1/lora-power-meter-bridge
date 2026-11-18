@@ -30,8 +30,10 @@ setup, and the choice is remembered:
 4. Choose **Keller · Zähler** and give it a name. Home WiFi is optional for this
    board. The read-head settings (protocol, polarity, pins) are folded away
    because automatic detection is right for almost every meter.
-5. Save. The board starts reading the meter and keeps its WiFi up. Come back to
-   this page any time; it now shows live status.
+5. Save. The board starts reading the meter and keeps its WiFi up. If you
+   changed its WiFi name or code, the page shows the new ones: rejoin with them
+   and open `http://192.168.4.1`. Otherwise it goes straight to the dashboard,
+   which you can come back to any time.
 
 The basement board does **not** need your home WiFi.
 
@@ -41,13 +43,22 @@ The basement board does **not** need your home WiFi.
    `http://192.168.4.1`.
 2. Choose **Wohnung · Gateway**, pick your home WiFi from the list and enter its
    password.
-3. Save. Its own WiFi disappears; the page stays reachable at the IP it got from
-   your router, and at `http://lilygo-power-XXXX.local`.
-4. Pair the two boards: on either board's page → *Funk* → **Koppeln**, with both
-   boards in range (set them up next to each other the first time).
-5. Turn on encryption: the basement board's display (page *Zugang*) and its page
+3. Save. The page stays open while the board joins your home WiFi and then
+   shows its new address (IP and `http://lilygo-power-XXXX.local`; the IP is on
+   the display too). Switch your phone back to your home WiFi and tap the
+   address. The board's own WiFi switches off about two minutes later. If it
+   cannot join (wrong password, 5 GHz-only network), the page says so and lets
+   you correct it.
+4. Enter the key: the basement board's display (page *Zugang*) and its page
    (*Funk* → *Verschlüsselung*) show a 16-character key. Type it into the
-   gateway's page under *Funk* → *Verschlüsselung*.
+   gateway's page under *Funk* → *Verschlüsselung*. The basement board always
+   encrypts, so without the key the two boards cannot read each other even when
+   paired. The *Funk* tab tells you when that is the problem.
+5. Pair the two boards: on **one** board's page → *Funk* → **Koppeln**, with both
+   boards in range (set them up next to each other the first time). The other
+   board answers by itself; both show *verbunden* within a few seconds.
+   Pressing it on both boards also works. **Neu koppeln** on a paired board
+   keeps the old pairing if no other board answers within a minute.
 
 ## 5. Home Assistant
 

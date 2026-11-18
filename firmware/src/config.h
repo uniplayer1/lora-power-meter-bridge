@@ -88,16 +88,25 @@ constexpr uint8_t kSparePin2 = 21;
 #define LORA_DUTY_BUDGET_MS (36UL * 1000UL)
 
 // ── Timing ───────────────────────────────────────────────────
-#define SEND_INTERVAL_DEFAULT_MS 10000UL
+// 15 s keeps a meter at SF7 at about 60 % of its hourly airtime budget. 10 s
+// needed 37 s of the 36 s allowed, so the budget ran out every hour and the
+// link went quiet until it recovered.
+#define SEND_INTERVAL_DEFAULT_MS 15000UL
 #define SEND_INTERVAL_MIN_MS 2000UL
 #define SEND_INTERVAL_MAX_MS 600000UL
 #define PAIRING_RETRY_MS 3000UL
 // How long a pairing attempt runs before it reports failure. Long enough to
 // move a board into range, short enough that nobody is left wondering.
 #define PAIRING_TIMEOUT_MS 60000UL
-#define PEER_TIMEOUT_MS 90000UL
+// The peer counts as lost after this long without a packet. Readings and their
+// acknowledgements arrive every send interval; a silent side sends a heartbeat
+// every HEARTBEAT_MS, so this tolerates three lost heartbeats in a row.
+#define PEER_TIMEOUT_MS 130000UL
 #define PEER_PROBE_MS 75000UL
-#define HEARTBEAT_MS 60000UL
+// Sent only after this long without any other transmission.
+#define HEARTBEAT_MS 30000UL
+// With nothing received for this long, the receiver is checked and re-armed.
+#define RX_WATCHDOG_MS 45000UL
 #define MQTT_RETRY_MS 5000UL
 
 // ── WiFi ─────────────────────────────────────────────────────

@@ -280,7 +280,7 @@ static const char kSetupHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
     <div class="card step" data-roles="1" hidden>
       <h2>Stromzähler</h2>
       <label for="interval">Sendeintervall (Sekunden)</label>
-      <input id="interval" type="number" min="2" max="600" step="1" value="10" inputmode="numeric">
+      <input id="interval" type="number" min="2" max="600" step="1" value="15" inputmode="numeric">
       <p class="hint">Wie oft ein Messwert zum Gateway geht. Erlaubt ist 1&nbsp;% Sendezeit pro Stunde – das Gerät hält
         das selbst ein und lässt bei Bedarf einzelne Sendungen aus.</p>
       <details class="more">
@@ -338,6 +338,14 @@ static const char kSetupHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
         <input id="mqttPass" type="password" placeholder="optional" autocomplete="new-password">
       </details>
     </div>
+  </div>
+
+  <div class="card" id="doneCard" hidden>
+    <h2 id="doneTitle">Gespeichert</h2>
+    <p class="lead" id="doneLead"></p>
+    <div class="rows" id="doneRows"></div>
+    <div class="actions" id="doneActions"></div>
+    <p class="hint" id="doneHint"></p>
   </div>
 
   <div class="savebar">
@@ -498,6 +506,7 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
         <div data-only="meter">
           <label for="interval">Sendeintervall (Sekunden)</label>
           <input id="interval" data-sync type="number" min="2" max="600" inputmode="numeric">
+          <p class="hint" id="intervalFloor"></p>
         </div>
         <p class="warnbox"><b>Beide Geräte brauchen dieselbe Frequenz und denselben SF</b>, sonst hören sie sich nicht.</p>
         <p class="hint">Erlaubt: 868,0625–868,5375&nbsp;MHz, höchstens 14&nbsp;dBm und 1&nbsp;% Sendezeit pro Stunde.
@@ -624,7 +633,7 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
         <label for="devname">Name</label><input id="devname" data-sync maxlength="27">
         <div class="actions">
           <button class="primary" id="saveDevice">Übernehmen</button>
-          <a class="ghost" id="setupLink" href="/setup">Rolle ändern …</a>
+          <a class="ghost" id="setupLink" href="/setup?edit=1">Rolle ändern …</a>
         </div>
       </div>
 
@@ -877,7 +886,7 @@ function render() {
   let pairText = l.paired ? ('mit ' + (l.peer_id || '?').toUpperCase()) : 'nein';
   if (l.pair_state === 'running') {
     pairText = 'läuft … ' + (l.pair_elapsed_s || 0) + ' / ' + (l.pair_timeout_s || 60) + ' s';
-  } else if (l.pair_state === 'timeout') {
+  } else if (l.pair_state === 'timeout' && !l.paired) {
     pairText = 'fehlgeschlagen';
   }
   set('lk-pair', pairText);
@@ -886,9 +895,19 @@ function render() {
     let cls = 'hint', txt = '';
     if (l.pair_state === 'running') {
       txt = 'Kopplung läuft – sendet und wartet auf Antwort (' + (l.pair_attempts || 0) + ' Versuche).';
+    } else if (l.pair_state === 'timeout' && l.paired) {
+      // A re-pair that found nobody keeps the old link, which may well work.
+      cls = 'hint';
+      txt = 'Neu koppeln: keine Antwort – die bisherige Kopplung mit ' + (l.peer_id || '?').toUpperCase() + ' bleibt bestehen.';
     } else if (l.pair_state === 'timeout') {
       cls = 'bad';
       txt = 'Kopplung fehlgeschlagen: ' + (l.pair_result || 'keine Antwort') + '. Beide Geräte näher zusammenbringen (Antennen dran?) und erneut starten.';
+    } else if (l.paired && !l.peer && l.auth_failures) {
+      cls = 'warnbox';
+      txt = 'Gekoppelt, aber die Pakete der Gegenstelle lassen sich nicht prüfen – auf beiden Geräten muss derselbe Schlüssel stehen (unten unter „Verschlüsselung“).';
+    } else if (l.paired && !l.peer && l.plaintext_dropped) {
+      cls = 'warnbox';
+      txt = 'Gekoppelt, aber die Gegenstelle sendet unverschlüsselt – auf dem Wohnungs-Gerät den Schlüssel vom Keller-Gerät eintragen.';
     } else if (!l.paired && l.traffic_age !== null && l.traffic_age !== undefined) {
       cls = 'warnbox';
       txt = 'Es kommen Pakete von ' + (src || '?') + ' an, aber die Geräte sind nicht gekoppelt – auf einem der beiden „Koppeln“ drücken.';
@@ -906,6 +925,12 @@ function render() {
 
   fill('freq', r.freq_mhz); fill('sf', r.sf); fill('power', r.power_dbm);
   if (r.interval_ms) fill('interval', Math.round(r.interval_ms / 1000));
+  if (r.min_interval_ms) {
+    const floorS = Math.ceil(r.min_interval_ms / 1000);
+    set('intervalFloor', r.interval_ms && r.interval_ms < r.min_interval_ms
+      ? 'Bei SF' + r.sf + ' sendet das Gerät höchstens alle ' + floorS + ' s – sonst wäre die erlaubte Sendezeit vor Ablauf der Stunde verbraucht.'
+      : 'Kürzestes Intervall bei SF' + r.sf + ': ' + floorS + ' s (1 % Sendezeit pro Stunde).');
+  }
   const activeFreq = r.active_freq_mhz !== undefined ? r.active_freq_mhz : r.freq_mhz;
   set('radio-active', activeFreq !== undefined
     ? num(activeFreq, 4) + ' MHz · SF' + (r.active_sf || r.sf) + ' · ' + (r.active_power_dbm !== undefined ? r.active_power_dbm : r.power_dbm) + ' dBm'
@@ -1229,9 +1254,79 @@ function initSetup() {
     if (res.ok && role === '2' && v('mqttHost')) {
       await post('/api/save', { mqttHost: v('mqttHost'), mqttPort: v('mqttPort'), mqttUser: v('mqttUser'), mqttPass: $('mqttPass').value });
     }
-    if (res.ok) { toast('Gespeichert – weiter zum Dashboard …'); setTimeout(() => { location.href = withToken('/'); }, 2500); }
+    if (res.ok) finish(res, data);
     else save.disabled = false;
   });
+
+  // After saving, the page says where the device will be found next instead of
+  // jumping to an address that may already be gone. A gateway joins the home
+  // network while its own access point stays up, so the page can watch the
+  // join and show the new address; a renamed access point needs a reconnect.
+  function finish(res, data) {
+    document.querySelectorAll('.steps, .savebar, #saveHint').forEach((el) => { el.hidden = true; });
+    const card = $('doneCard');
+    card.hidden = false;
+    window.scrollTo(0, 0);
+    const rows = (list) => {
+      $('doneRows').innerHTML = list.map(([k, v]) => '<div class="row"><span>' + esc(k) + '</span><span class="mono">' + esc(v) + '</span></div>').join('');
+    };
+    const actions = (list) => {
+      $('doneActions').innerHTML = list.map(([href, label, cls]) => '<a class="' + (cls || 'primary') + '" href="' + esc(href) + '">' + esc(label) + '</a>').join('');
+    };
+    const say = (title, lead, hint) => { set('doneTitle', title); set('doneLead', lead || ''); set('doneHint', hint || ''); };
+    const host = 'http://' + (res.host || '') + '/';
+
+    if (role === '1' && res.ap_changed) {
+      say('Gespeichert – bitte neu verbinden',
+        'Das Geräte-WLAN startet gleich mit den neuen Daten neu. Das Handy mit diesem WLAN verbinden und dann die Adresse öffnen.',
+        'Der Code ist WLAN-Passwort und Anmeldecode zugleich. Er steht auch auf dem Display (Seite „Zugang“).');
+      rows([['WLAN', res.ap_ssid], ['Code', data.apcode || 'unverändert'], ['Adresse', 'http://' + (res.ap_ip || '192.168.4.1')]]);
+      actions([['http://' + (res.ap_ip || '192.168.4.1') + '/', 'Zum Dashboard']]);
+      return;
+    }
+    if (role !== '2' || !res.net_change) {
+      say('Gespeichert', 'Weiter zum Dashboard …');
+      actions([[withToken('/'), 'Zum Dashboard']]);
+      setTimeout(() => { location.href = withToken('/'); }, 1500);
+      return;
+    }
+
+    say('Verbinde mit „' + res.sta_ssid + '“ …',
+      'Das Gateway meldet sich jetzt im Heim-WLAN an. Diese Seite bleibt mit dem Einrichtungs-WLAN verbunden und zeigt gleich die neue Adresse.');
+    rows([['Heim-WLAN', res.sta_ssid]]);
+    actions([]);
+    const started = Date.now();
+    let lastOk = Date.now();
+    async function poll() {
+      try {
+        const s = await (await fetch(withToken('/api/state'), { cache: 'no-store' })).json();
+        lastOk = Date.now();
+        if (s.wifi && s.wifi.connected && s.wifi.ip && s.wifi.ip !== '-') {
+          const ip = 'http://' + s.wifi.ip + '/';
+          say('Verbunden', 'Jetzt das Handy wieder mit „' + res.sta_ssid + '“ verbinden und die neue Adresse öffnen.',
+            'Das Einrichtungs-WLAN „' + res.ap_ssid + '“ schaltet sich in etwa zwei Minuten ab. Die Adresse steht auch auf dem Display.');
+          rows([['Heim-WLAN', res.sta_ssid], ['Adresse', s.wifi.ip], ['Name', res.host]]);
+          actions([[ip, 'Zur neuen Adresse'], [host, res.host, 'ghost']]);
+          return;
+        }
+      } catch (e) { /* the phone may hop back onto the access point; keep trying */ }
+      if (Date.now() - lastOk > 30000) {
+        say('Verbindung zum Gerät verloren',
+          'Wahrscheinlich ist das Gateway schon im Heim-WLAN. Das Handy mit „' + res.sta_ssid + '“ verbinden und den Namen öffnen – die IP-Adresse steht auch auf dem Display.');
+        rows([['Heim-WLAN', res.sta_ssid], ['Name', res.host]]);
+        actions([[host, 'Zum Gateway']]);
+        return;
+      }
+      if (Date.now() - started > 60000) {
+        say('Noch nicht verbunden',
+          'Das Gateway kommt nicht ins WLAN „' + res.sta_ssid + '“. Meist stimmt das Passwort nicht, oder das Netz ist nur 5 GHz (das Gerät kann nur 2,4 GHz).',
+          'Es versucht es weiter. Diese Seite bleibt über das Einrichtungs-WLAN erreichbar.');
+        actions([[withToken('/setup?edit=1'), 'Einstellungen korrigieren', 'ghost']]);
+      }
+      setTimeout(poll, 2000);
+    }
+    setTimeout(poll, 4000);
+  }
 }
 
 if ($('tab-status')) initApp();

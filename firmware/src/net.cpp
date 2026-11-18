@@ -175,24 +175,38 @@ void netLoop() {
 void netReconfigure() {
   const DeviceConfig& cfg = configStore.get();
   const bool wantSta = cfg.staConfigured && cfg.staSsid[0] != '\0';
+  const bool apWanted = cfg.role == DeviceRole::Meter || cfg.keepApOn || !wantSta;
+  // An access point that is up stays up while the station joins. The owner is
+  // usually connected to it right now (first setup), and the setup page polls
+  // it to learn the address the device gets in the home network. Tearing it
+  // down here cut that connection mid-request, so the page never heard back
+  // and stayed on the setup form. netLoop() takes a gateway's AP down once the
+  // station connection has been stable for a while.
+  const bool keepAp = apUp;
 
-  WiFi.disconnect(true, false);
-  apUp = false;
-  stopPortal();
+  WiFi.disconnect(false, false);  // the station side only
+  staUpSinceMs = 0;
 
   if (wantSta) {
-    WiFi.mode(cfg.role == DeviceRole::Meter || cfg.keepApOn ? WIFI_AP_STA : WIFI_STA);
+    WiFi.mode(apWanted || keepAp ? WIFI_AP_STA : WIFI_STA);
     WiFi.begin(cfg.staSsid, cfg.staPass);
     staAttempted = true;
     staStartedAtMs = millis();
     lastStaAttemptMs = staStartedAtMs;
   } else {
-    WiFi.mode(cfg.role == DeviceRole::Meter || cfg.keepApOn ? WIFI_AP_STA : WIFI_AP);
+    WiFi.mode(WIFI_AP);
   }
 
-  if (cfg.role == DeviceRole::Meter || cfg.keepApOn || !wantSta) {
-    startAccessPoint();
-    if (!configStore.provisioned() || !wantSta) startPortal();
+  if (apWanted || keepAp) {
+    startAccessPoint();  // no-op while it is already up
+    if (!configStore.provisioned() || !wantSta) {
+      startPortal();
+    } else {
+      stopPortal();
+    }
+  } else {
+    stopPortal();
+    apUp = false;
   }
 }
 

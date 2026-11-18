@@ -86,9 +86,17 @@ class RadioLink {
   const LinkStats& stats() const { return stats_; }
   const core::DutyCycleBudget& budget() const { return budget_; }
   uint32_t estimatedAirtimeMs(size_t payloadBytes) const;
+  // The shortest send interval the airtime budget can sustain at the current
+  // spreading factor, with headroom for acknowledgements and pairing. The
+  // scheduler never sends faster than this, whatever the configured interval:
+  // a meter that spends its hour's budget in 40 minutes falls silent for the
+  // other 20, and the gateway reports the link as lost.
+  uint32_t minSendIntervalMs() const;
 
-  // Pairing: the gateway broadcasts a request, the node answers, both keep the
-  // net id. Only used while unpaired.
+  // Pairing: the side where "Koppeln" was pressed broadcasts a request, the
+  // other side answers with its net id, and the first side confirms. Either
+  // side can start it, also both at once, and also while already paired: the
+  // old peer is kept until a new one has answered, and restored if none does.
   void startPairing(uint32_t nowMs);
   void stopPairing();
   // Forgets the peer locally so a fresh pairing can be started (the other end
@@ -107,7 +115,9 @@ class RadioLink {
 
  private:
   void onReceive();
-  void markPaired(uint16_t peerId);
+  void markPaired(uint16_t peerId, uint32_t nowMs);
+  void endPairing(PairState state, uint32_t nowMs);
+  void checkReceiver(uint32_t nowMs);
   static void IRAM_ATTR rxIsr();
   void handlePacket(const core::Packet& packet, uint32_t nowMs);
   void refreshPeer(uint32_t nowMs);
@@ -135,7 +145,23 @@ class RadioLink {
   uint16_t peerId_ = 0;
   uint32_t pairKey_ = 0;
   uint32_t lastPairTxMs_ = 0;
-  uint32_t lastStatusTxMs_ = 0;
+  // Pairing roles. initiating_: this side sends the requests (its button was
+  // pressed). pendingConfirmFrom_: this side answered a request and waits for
+  // that device's confirmation. previousPeer_: the peer from before a re-pair,
+  // put back if the new pairing finds nobody.
+  bool initiating_ = false;
+  uint16_t pendingConfirmFrom_ = 0;
+  uint16_t previousPeer_ = 0;
+  // The confirmation closes the handshake and is the one frame whose loss
+  // leaves the two ends disagreeing, so it is repeated a few times.
+  uint8_t confirmsLeft_ = 0;
+  uint32_t nextConfirmMs_ = 0;
+  // Any transmission counts as presence; the heartbeat only fills silences.
+  uint32_t lastTxMs_ = 0;
+  uint32_t heartbeatDueMs_ = 0;
+  // Last time the receiver handed up anything at all, for the stuck-receiver check.
+  uint32_t lastRxIrqMs_ = 0;
+  uint32_t lastRxCheckMs_ = 0;
   uint16_t seq_ = 0;
   uint16_t awaitingAckSeq_ = 0;
   bool awaitingAck_ = false;

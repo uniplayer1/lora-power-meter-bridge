@@ -101,7 +101,11 @@ void handleInbound(const core::Packet& packet, uint32_t now) {
 void schedulerTick(uint32_t now) {
   const DeviceConfig& cfg = configStore.get();
   if (!configStore.provisioned() || !radioLink.stats().radioOk) return;
-  if (now - lastSendMs < cfg.sendIntervalMs) return;
+  // Never faster than the airtime budget sustains at the current spreading
+  // factor: running it dry silences the link for the rest of the hour.
+  const uint32_t floorMs = radioLink.minSendIntervalMs();
+  const uint32_t intervalMs = cfg.sendIntervalMs > floorMs ? cfg.sendIntervalMs : floorMs;
+  if (now - lastSendMs < intervalMs) return;
   lastSendMs = now;
 
   if (cfg.role != DeviceRole::Meter) return;

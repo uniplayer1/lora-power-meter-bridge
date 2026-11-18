@@ -59,6 +59,7 @@ bool RadioLink::begin(const DeviceConfig& config) {
   radio_.setCRC(true);
   radio_.setPacketReceivedAction(rxIsr);
   radio_.startReceive();
+  lastRxIrqMs_ = millis();
 
   stats_.radioOk = true;
   logEvent("radio OK %.3f MHz SF%u CR%d %d dBm, airtime %lu ms/packet", freq_, sf_, cr_,
@@ -94,6 +95,16 @@ uint32_t RadioLink::estimatedAirtimeMs(size_t payloadBytes) const {
   // +2 for the CRC the modem appends is already covered by the formula's crc
   // term; this is the wire length of one of our packets.
   return core::loraAirtimeMsCeil(sf_, bw_, cr_, static_cast<uint8_t>(preamble_), payloadBytes);
+}
+
+uint32_t RadioLink::minSendIntervalMs() const {
+  // A sealed reading: header + telemetry + tag. 85 % of the budget goes to
+  // readings; the rest covers heartbeats, pairing and the odd retry.
+  const uint32_t airtime =
+      estimatedAirtimeMs(core::kHeaderSize + core::MeterTelemetry::kWireSize + core::kLinkTagSize);
+  const uint64_t budgetForReadings = static_cast<uint64_t>(LORA_DUTY_BUDGET_MS) * 85u / 100u;
+  const uint64_t interval = static_cast<uint64_t>(airtime) * LORA_DUTY_WINDOW_MS / budgetForReadings + 1;
+  return interval < SEND_INTERVAL_MIN_MS ? SEND_INTERVAL_MIN_MS : static_cast<uint32_t>(interval);
 }
 
 bool RadioLink::paired() const { return netId_ != 0 && peerId_ != 0; }
@@ -149,6 +160,13 @@ bool RadioLink::send(core::PacketType type, const uint8_t* payload, uint8_t payl
 
   const int state = radio_.transmit(wire, len);
   radio_.startReceive();
+  // DIO1 also signals "transmission done", and the receive interrupt is still
+  // attached while transmit() polls for it, so every transmission used to raise
+  // rxFlag_. The next loop then read the buffer and restarted the receiver -
+  // a few milliseconds after sending, which is exactly when the other side's
+  // acknowledgement arrives. That restart cut most acknowledgements off.
+  rxFlag_ = false;
+  lastTxMs_ = millis();
 
   budget_.commit(now, airtime);
   stats_.airtimeMs += airtime;
@@ -178,6 +196,14 @@ bool RadioLink::sendTelemetry(const core::MeterTelemetry& telemetry, uint32_t no
 }
 
 void RadioLink::startPairing(uint32_t nowMs) {
+  // Re-pairing while paired: the old peer is set aside so that an answer can be
+  // accepted, and put back if nobody answers. Before, a paired device ignored
+  // every answer - "Neu koppeln" always ended in "fehlgeschlagen", even with
+  // the other device right next to it and the link working.
+  if (!stats_.pairingActive && peerId_ != 0) previousPeer_ = peerId_;
+  peerId_ = 0;
+  initiating_ = true;
+  pendingConfirmFrom_ = 0;
   stats_.pairingActive = true;
   stats_.pairState = PairState::Running;
   stats_.pairingStartedMs = nowMs;
@@ -187,14 +213,33 @@ void RadioLink::startPairing(uint32_t nowMs) {
   logEvent("pairing started (timeout %lus)", static_cast<unsigned long>(PAIRING_TIMEOUT_MS / 1000));
 }
 
-void RadioLink::stopPairing() {
+void RadioLink::endPairing(PairState state, uint32_t nowMs) {
+  initiating_ = false;
+  pendingConfirmFrom_ = 0;
   stats_.pairingActive = false;
-  if (stats_.pairState == PairState::Running) stats_.pairState = PairState::Unpaired;
+  stats_.pairState = state;
+  stats_.pairingFinishedMs = nowMs;
+  if (peerId_ == 0 && previousPeer_ != 0) {
+    peerId_ = previousPeer_;
+    logEvent("pairing: keeping the previous peer %04X", peerId_);
+  }
+  previousPeer_ = 0;
+}
+
+void RadioLink::stopPairing() {
+  if (!stats_.pairingActive) return;
+  endPairing(PairState::Unpaired, millis());
   logEvent("pairing stopped");
 }
 
 void RadioLink::clearPairing() {
   peerId_ = 0;
+  previousPeer_ = 0;
+  initiating_ = false;
+  pendingConfirmFrom_ = 0;
+  confirmsLeft_ = 0;
+  stats_.peerOnline = false;
+  stats_.lastPeerSeenMs = 0;
   stats_.pairState = PairState::Unpaired;
   stats_.pairingActive = false;
   stats_.pairingResult[0] = '\0';
@@ -212,25 +257,57 @@ const char* RadioLink::pairStateName() const {
   }
 }
 
-void RadioLink::markPaired(uint16_t peerId) {
+void RadioLink::markPaired(uint16_t peerId, uint32_t nowMs) {
+  const bool samePeer = peerId == configStore.get().peerShortId && netId_ == configStore.get().netId &&
+                        pairKey_ == configStore.get().pairKey;
+  const bool newPeer = peerId != previousPeer_ && peerId != configStore.get().peerShortId;
   peerId_ = peerId;
+  previousPeer_ = 0;
   // Pairing can adopt the other end's net id, and the net id is part of the key
   // derivation: without this the two ends would derive different keys and every
   // frame would be refused.
   updateLinkKey();
-  stats_.peerOnline = false;
-  // A stamp from before the pairing would show as an age for a peer that has
-  // not been heard from yet.
-  stats_.lastPeerSeenMs = 0;
+  // "Online" needs a real, decodable packet from the peer, which a pairing
+  // frame is not - a missing or different link secret would otherwise look
+  // connected for two minutes and then drop. A heartbeat goes out shortly, so
+  // the other side hears from us without waiting for the next reading.
+  if (newPeer) {
+    stats_.peerOnline = false;
+    stats_.lastPeerSeenMs = 0;
+  }
+  heartbeatDueMs_ = nowMs + 1500;
+  if (heartbeatDueMs_ == 0) heartbeatDueMs_ = 1;
+  initiating_ = false;
+  pendingConfirmFrom_ = 0;
   stats_.pairState = PairState::Done;
   stats_.pairingActive = false;
-  stats_.pairingFinishedMs = millis();
+  stats_.pairingFinishedMs = nowMs;
   snprintf(stats_.pairingResult, sizeof(stats_.pairingResult), "Verbunden mit %04X", peerId);
-  configStore.mutableGet().peerShortId = peerId;
-  configStore.mutableGet().netId = netId_;
-  configStore.mutableGet().pairKey = pairKey_;
-  configStore.save();
+  if (!samePeer) {
+    configStore.mutableGet().peerShortId = peerId;
+    configStore.mutableGet().netId = netId_;
+    configStore.mutableGet().pairKey = pairKey_;
+    configStore.save();
+  }
   logEvent("paired with %04X on net %04X", peerId, netId_);
+}
+
+void RadioLink::checkReceiver(uint32_t nowMs) {
+  // A receiver that stopped reporting packets is re-armed instead of staying
+  // deaf until the board is unplugged. Two cases: a packet arrived but its
+  // interrupt edge was missed (DIO1 stays high, so no new edge ever comes), or
+  // the modem left receive mode. Both are cheap to check every so often.
+  if (!stats_.radioOk) return;
+  if (!olderThan(nowMs, lastRxIrqMs_, RX_WATCHDOG_MS)) return;
+  if (!olderThan(nowMs, lastRxCheckMs_, RX_WATCHDOG_MS)) return;
+  lastRxCheckMs_ = nowMs;
+  const uint32_t irq = radio_.getIrqFlags();
+  if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
+    logEvent("radio: packet without interrupt - reading it");
+    onReceive();
+    return;
+  }
+  radio_.startReceive();
 }
 
 void RadioLink::loop(uint32_t nowMs) {
@@ -239,24 +316,41 @@ void RadioLink::loop(uint32_t nowMs) {
     onReceive();
   }
 
+  // The `now` handed down from main.cpp was taken before the WiFi and web work
+  // of this iteration, and packet handling stamps with millis(): mixing the two
+  // makes "later" look earlier. Everything below uses one fresh clock.
+  nowMs = millis();
   refreshPeer(nowMs);
+  checkReceiver(nowMs);
 
-  if (awaitingAck_ && olderThan(millis(), awaitingAckSinceMs_, 8000)) {
+  if (awaitingAck_ && olderThan(nowMs, awaitingAckSinceMs_, 8000)) {
     awaitingAck_ = false;
     ++stats_.acksMissed;
   }
 
+  if (confirmsLeft_ > 0 && peerId_ != 0 && static_cast<int32_t>(nowMs - nextConfirmMs_) >= 0) {
+    --confirmsLeft_;
+    nextConfirmMs_ = nowMs + 700;
+    uint8_t confirm[4];
+    core::putLe(confirm, srcId_, 4);
+    send(core::PacketType::PairConfirm, confirm, sizeof(confirm), peerId_, false);
+  }
+
   if (stats_.pairingActive) {
-    if (nowMs - stats_.pairingStartedMs > PAIRING_TIMEOUT_MS) {
-      stats_.pairingActive = false;
-      stats_.pairState = PairState::TimedOut;
-      stats_.pairingFinishedMs = nowMs;
-      snprintf(stats_.pairingResult, sizeof(stats_.pairingResult),
-               "Keine Gegenstelle geantwortet (%lu Versuche)",
-               static_cast<unsigned long>(stats_.pairingAttempts));
+    if (olderThan(nowMs, stats_.pairingStartedMs, PAIRING_TIMEOUT_MS)) {
+      const uint16_t kept = previousPeer_;
+      endPairing(PairState::TimedOut, nowMs);
+      if (kept != 0) {
+        snprintf(stats_.pairingResult, sizeof(stats_.pairingResult),
+                 "Keine Antwort - Kopplung mit %04X bleibt", kept);
+      } else {
+        snprintf(stats_.pairingResult, sizeof(stats_.pairingResult),
+                 "Keine Gegenstelle geantwortet (%lu Versuche)",
+                 static_cast<unsigned long>(stats_.pairingAttempts));
+      }
       logEvent("pairing timed out after %lu attempts",
                static_cast<unsigned long>(stats_.pairingAttempts));
-    } else if (nowMs - lastPairTxMs_ > PAIRING_RETRY_MS) {
+    } else if (initiating_ && olderThan(nowMs, lastPairTxMs_, PAIRING_RETRY_MS)) {
       lastPairTxMs_ = nowMs;
       ++stats_.pairingAttempts;
       uint8_t payload[4];
@@ -271,23 +365,41 @@ void RadioLink::loop(uint32_t nowMs) {
     }
   }
 
-  // Periodic presence so both ends can tell "link down" from "meter quiet".
-  if (stats_.radioOk && nowMs - lastStatusTxMs_ > HEARTBEAT_MS) {
-    lastStatusTxMs_ = nowMs;
+  // Presence, so both ends can tell "link down" from "meter quiet". Any frame
+  // already says "I am here": readings and acknowledgements go out every send
+  // interval, and an extra status frame each minute on top of them cost
+  // airtime the meter did not have. So it only fills silences, plus one right
+  // after pairing so that both ends see each other within seconds.
+  const bool heartbeatForced = heartbeatDueMs_ != 0 && static_cast<int32_t>(nowMs - heartbeatDueMs_) >= 0;
+  if (stats_.radioOk && confirmsLeft_ == 0 &&
+      (heartbeatForced || lastTxMs_ == 0 || olderThan(nowMs, lastTxMs_, HEARTBEAT_MS))) {
+    heartbeatDueMs_ = 0;
     uint8_t payload[2];
     core::putLe(payload, static_cast<uint64_t>(stats_.txPackets & 0xFFFF), 2);
-    send(core::PacketType::Status, payload, sizeof(payload), peerId_ ? peerId_ : 0, false);
+    if (!send(core::PacketType::Status, payload, sizeof(payload), peerId_ ? peerId_ : 0, false)) {
+      // Refused by the budget: try again in a heartbeat, not on every loop.
+      lastTxMs_ = nowMs;
+    }
   }
 }
 
 void RadioLink::onReceive() {
+  // Only a finished reception is read. Anything else (a stray edge from the
+  // transmitter) must not touch the modem: restarting receive mode in the middle
+  // of an incoming frame throws that frame away.
+  const uint32_t irq = radio_.getIrqFlags();
+  if ((irq & RADIOLIB_SX126X_IRQ_RX_DONE) == 0) return;
+  lastRxIrqMs_ = millis();
+
   const size_t available = radio_.getPacketLength();
-  if (available == 0 || available > core::kHeaderSize + core::kMaxPayload + core::kCrcSize) {
+  constexpr size_t kMaxFrame = core::kHeaderSize + core::kMaxPayload + core::kLinkTagSize;
+  static_assert(core::kLinkTagSize >= core::kCrcSize, "frame buffer sized for the larger trailer");
+  if (available == 0 || available > kMaxFrame) {
     radio_.startReceive();
     return;
   }
 
-  uint8_t buffer[core::kHeaderSize + core::kMaxPayload + core::kCrcSize];
+  uint8_t buffer[kMaxFrame];
   const int state = radio_.readData(buffer, available);
   const int rssi = radio_.getRSSI();
   const float snr = radio_.getSNR();
@@ -371,38 +483,55 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
       break;
 
     case core::PacketType::PairRequest: {
-      // Answer only when unpaired, so an established link cannot be stolen by a
-      // neighbour's pairing broadcast.
-      if (paired() || packet.payloadLen < 4) break;
-      const uint32_t key = static_cast<uint32_t>(core::getLe(packet.payload, 4));
+      if (packet.payloadLen < 4) break;
+      // Answered when this side is free, or when the request comes from the
+      // device it is already paired with (that one is re-pairing). A neighbour's
+      // broadcast cannot take over an established link.
+      const bool fromCurrentPeer = peerId_ != 0 && packet.src == peerId_;
+      if (paired() && !fromCurrentPeer) break;
+      // Both buttons pressed: both sides send requests, and if both answered,
+      // each would adopt the other's net id and they would end up on different
+      // keys. The lower id answers, the higher id stays the one that asks.
+      if (initiating_ && srcId_ > packet.src) break;
+      if (initiating_) {
+        initiating_ = false;
+        logEvent("pairing: %04X is pairing too - answering it", packet.src);
+      }
       uint8_t reply[8];
       core::putLe(reply, pairKey_, 4);
       core::putLe(reply + 4, netId_, 4);
       send(core::PacketType::PairAck, reply, sizeof(reply), packet.src, false);
-      (void)key;
+      pendingConfirmFrom_ = packet.src;
       break;
     }
 
     case core::PacketType::PairAck: {
-      if (paired() || packet.payloadLen < 8) break;
+      // Only the side that asked takes an answer. Before, any unpaired device
+      // adopted the net id from any answer it overheard.
+      if (!initiating_ || packet.payloadLen < 8 || packet.dst != srcId_) break;
       const uint32_t nodeKey = static_cast<uint32_t>(core::getLe(packet.payload, 4));
       const uint32_t nodeNet = static_cast<uint32_t>(core::getLe(packet.payload + 4, 4));
       netId_ = static_cast<uint16_t>(nodeNet & 0xFFFF);
       pairKey_ = nodeKey;
-      markPaired(packet.src);
+      markPaired(packet.src, nowMs);
       // Close the handshake: the answering side still has no idea who we are,
-      // and would keep reporting itself as unpaired.
-      uint8_t confirm[4];
-      core::putLe(confirm, srcId_, 4);
-      send(core::PacketType::PairConfirm, confirm, sizeof(confirm), packet.src, false);
+      // and would keep reporting itself as unpaired. Repeated from loop(), so a
+      // single lost frame does not leave the two ends disagreeing.
+      confirmsLeft_ = 3;
+      nextConfirmMs_ = nowMs;
       logEvent("pairing confirmed to %04X", packet.src);
       break;
     }
 
     case core::PacketType::PairConfirm: {
-      if (packet.payloadLen < 4) break;
-      const uint16_t initiator = static_cast<uint16_t>(core::getLe(packet.payload, 4));
-      markPaired(initiator != 0 ? initiator : static_cast<uint16_t>(packet.src));
+      if (packet.payloadLen < 4 || packet.dst != srcId_) break;
+      // Accepted from the device this side just answered, or as a repeat from
+      // the one it is already paired with. Anything else did not ask us.
+      const bool expected = pendingConfirmFrom_ != 0 && packet.src == pendingConfirmFrom_;
+      const bool repeat = peerId_ != 0 && packet.src == peerId_;
+      if (!expected && !repeat) break;
+      if (repeat && !expected && stats_.pairState == PairState::Done) break;
+      markPaired(packet.src, nowMs);
       break;
     }
 

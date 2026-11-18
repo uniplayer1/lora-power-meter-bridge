@@ -115,6 +115,12 @@ void WebUi::begin(RadioLink* link, MeterReader* meter) {
 
 void WebUi::loop() {
   server_.handleClient();
+  if (netChangeAtMs_ != 0 && static_cast<int32_t>(millis() - netChangeAtMs_) >= 0) {
+    netChangeAtMs_ = 0;
+    netReconfigure();
+    if (netChangeAp_) netApplyApSettings();
+    netChangeAp_ = false;
+  }
   if (sessionToken_.length() > 0 && millis() - sessionSinceMs_ > SESSION_TIMEOUT_MS) {
     sessionToken_ = "";
   }
@@ -181,6 +187,15 @@ void WebUi::handleRoot() {
 void WebUi::handleSetupPage() {
   if (configStore.provisioned() && !authorized() && !isApClient()) {
     requireAuthOrRedirect();
+    return;
+  }
+  // A configured device opens the setup form only when asked for it ("Rolle
+  // ändern" links to /setup?edit=1). A reload of /setup, or the phone's
+  // captive-portal check after reconnecting, lands on the dashboard instead of
+  // a form that looks as if setup had not worked.
+  if (configStore.provisioned() && !server_.hasArg("edit")) {
+    server_.sendHeader("Location", "/", true);
+    server_.send(302, "text/plain", "");
     return;
   }
   servePage(kSetupHtml);
@@ -360,6 +375,9 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += "\"power_dbm\":" + String(cfg.loraPowerDbm) + ",";
   j += "\"power_max\":" + String(LORA_DEFAULT_POWER_DBM) + ",";
   j += "\"interval_ms\":" + String(cfg.sendIntervalMs) + ",";
+  // The scheduler uses the longer of the configured interval and this airtime
+  // floor for the current spreading factor.
+  j += "\"min_interval_ms\":" + String(link->minSendIntervalMs()) + ",";
   // What the modem is tuned to right now. Equal to the stored values unless a
   // re-tune failed - which is exactly the case the page has to be able to show.
   j += "\"active_freq_mhz\":" + String(link->frequencyMhz(), 4) + ",";
@@ -564,10 +582,14 @@ void WebUi::handleSetupSave() {
     sendJson(400, "{\"ok\":false,\"message\":\"Rolle fehlt\"}");
     return;
   }
+  const DeviceRole roleBefore = cfg.role;
   cfg.role = static_cast<DeviceRole>(role);
 
+  const String apBefore = String(configStore.apSsid()) + "\n" + configStore.setupCode();
   if (server_.hasArg("apname")) configStore.setApSsid(server_.arg("apname"));
   if (server_.hasArg("apcode")) configStore.setSetupCode(server_.arg("apcode"));
+  const bool apChanged = apBefore != String(configStore.apSsid()) + "\n" + configStore.setupCode();
+  const String staBefore = String(cfg.staSsid) + "\n" + cfg.staPass;
 
   const String name = argOr("name", "");
   if (name.length() > 0) {
@@ -615,11 +637,27 @@ void WebUi::handleSetupSave() {
                       static_cast<uint8_t>(server_.arg("meterTx").toInt()));
     }
   }
-  netReconfigure();
-  netApplyApSettings();
+  // WiFi is switched only when something about it changed, and only after the
+  // answer below is out. It tells the page where the device will be found next.
+  const bool staChanged = staBefore != String(cfg.staSsid) + "\n" + cfg.staPass;
+  const bool wantSta = cfg.staConfigured && cfg.staSsid[0] != '\0';
+  const bool netChange = staChanged || apChanged || roleBefore != cfg.role || (wantSta && !netStaUp());
+  if (netChange) {
+    netChangeAtMs_ = millis() + 1500;
+    if (netChangeAtMs_ == 0) netChangeAtMs_ = 1;
+    netChangeAp_ = apChanged;
+  }
 
   logEvent("provisioned as %s (net %04X)", role == 1 ? "meter node" : "gateway", cfg.netId);
-  sendJson(200, "{\"ok\":true,\"message\":\"Gespeichert\",\"role\":" + String(role) + "}");
+  String j = "{\"ok\":true,\"message\":\"Gespeichert\",\"role\":" + String(role);
+  j += ",\"net_change\":" + String(netChange ? "true" : "false");
+  j += ",\"ap_changed\":" + String(apChanged ? "true" : "false");
+  j += ",\"ap_ssid\":\"" + escapeJson(String(configStore.apSsid())) + "\"";
+  j += ",\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\"";
+  j += ",\"sta_ssid\":\"" + escapeJson(String(cfg.staSsid)) + "\"";
+  j += ",\"host\":\"" + netHostName() + ".local\"";
+  j += "}";
+  sendJson(200, j);
 }
 
 bool WebUi::applySaveField(const String& key, const String& value) {
@@ -816,7 +854,7 @@ void WebUi::handleAction() {
     if (link_) link_->clearPairing();
     cfg.peerShortId = 0;
     configStore.save();
-    sendJson(200, "{\"ok\":true,\"message\":\"Kopplung gelöst - die Gegenstelle antwortet beim nächsten Versuch wieder\"}");
+    sendJson(200, "{\"ok\":true,\"message\":\"Kopplung gelöst - zum neu Koppeln auf einem der beiden Geräte „Koppeln“ drücken\"}");
   } else if (action == "sim-on" || action == "sim-off") {
     if (meter_) meter_->setSimulation(action == "sim-on");
     const String msg = String("Simulator ") + (action == "sim-on" ? "an" : "aus");

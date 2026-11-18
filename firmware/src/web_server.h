@@ -77,6 +77,11 @@ class WebUi {
   String sessionToken_;
   uint32_t sessionSinceMs_ = 0;
   uint32_t restartAtMs_ = 0;
+  // A network change requested by the setup page, applied a moment after the
+  // answer has gone out: switching WiFi first dropped the very connection the
+  // answer had to travel over.
+  uint32_t netChangeAtMs_ = 0;
+  bool netChangeAp_ = false;  // the AP name or code changed as well
   uint8_t failedLogins_ = 0;
   bool otaRejected_ = false;  // the upload in progress is the wrong image
   uint32_t lastFailedLoginMs_ = 0;

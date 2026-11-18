@@ -24,7 +24,7 @@ flowchart LR
 | | Meter node (basement) | Gateway (flat) |
 |---|---|---|
 | UART | reads the meter through an IR read head on GPIO40/41 | unused |
-| Radio | sends a telemetry packet every 10 s | receives, ACKs, feeds Home Assistant |
+| Radio | sends a telemetry packet every 15 s (never faster than the airtime limit allows at the chosen SF) | receives, ACKs, feeds Home Assistant |
 | Network | keeps its own access point permanently — it is the on-site status display | joins the home WLAN, own AP only until provisioned, and again as fallback |
 | Display | readings, protocol, polarity, link quality | received readings, link quality, IP |
 | LED | solid = healthy, slow blink = no peer, fast blink = meter quiet | same |
@@ -36,8 +36,10 @@ in the web UI for meters that detection gets wrong.
 
 Readings are sealed with AES-128-CTR and an HMAC-SHA256 tag (6 bytes) under a key
 derived from an 8-byte link secret and the network id. The secret is generated on
-the meter node, shown on its access point, and typed into the gateway once. With
-no secret set, packets travel in the clear and are still accepted.
+the meter node, shown on its access point, and typed into the gateway once. The
+meter node creates its secret on first start and always seals, so the gateway
+needs the same secret before the two can read each other. Only pairing frames
+travel in the clear.
 
 ## Hardware
 
