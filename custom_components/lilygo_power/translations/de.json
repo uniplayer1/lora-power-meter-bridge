@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "confirm": {
+        "title": "LilyGo Stromzähler",
+        "description": "**{name}** ({model}) hinzufügen? Das Gerät hat sich selbst unter {host} gemeldet."
+      },
+      "user": {
+        "title": "LilyGo Stromzähler",
+        "description": "Adresse des Gateway-Geräts eintragen. Normalerweise findet Home Assistant das Gerät von selbst über mDNS – das hier ist der Notweg.",
+        "data": {
+          "host": "Adresse"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits eingerichtet."
+    }
+  }
+}

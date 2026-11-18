@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "confirm": {
+        "title": "LilyGo Power Meter",
+        "description": "Add **{name}** ({model})? The device announced itself at {host}."
+      },
+      "user": {
+        "title": "LilyGo Power Meter",
+        "description": "Enter the address of the gateway board. Discovery over mDNS is the normal path; this is the fallback.",
+        "data": {
+          "host": "Address"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}

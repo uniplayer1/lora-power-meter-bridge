@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Power Meter Flasher</title>
+<meta name="description" content="Install the LilyGO T3-S3 power-meter firmware from the browser.">
+<!-- Published by the CI/CD workflow on every release tag, next to manifest.json
+     and the firmware parts. ESP Web Tools does the flashing over Web Serial. -->
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  :root{color-scheme:dark;--bg:#070b18;--card:rgba(255,255,255,.045);--line:rgba(255,255,255,.1);--txt:#e9edfb;--muted:#98a3c4;--accent:#a259ff;--accent2:#5b8cff;--warn:#fbbf24}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:680px;margin:0 auto;padding:40px 16px 64px}
+  h1{font-size:1.6rem;margin:0 0 4px}
+  h2{font-size:1rem;margin:0 0 10px}
+  p,li{color:var(--muted)}
+  b,strong{color:var(--txt)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-top:16px}
+  ol{padding-left:20px;margin:0} li{margin:6px 0}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:rgba(0,0,0,.35);padding:1px 6px;border-radius:6px;color:var(--txt)}
+  .version{display:inline-block;font-size:.8rem;border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--muted)}
+  esp-web-install-button button[slot=activate]{font:inherit;font-weight:650;color:#fff;border:0;border-radius:11px;padding:13px 22px;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));width:100%}
+  .warn{color:var(--warn)}
+  a{color:var(--accent2)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Power Meter Flasher</h1>
+  <span class="version" id="version">LilyGO T3-S3 · SX1262</span>
+
+  <div class="card">
+    <h2>Install from the browser</h2>
+    <ol>
+      <li>Use <b>Chrome or Edge</b> on a computer (Web Serial is not available in Firefox, Safari or on phones).</li>
+      <li>Connect the board with a USB-C <b>data</b> cable. Antenna on first.</li>
+      <li>Press the button, pick the port (<code>USB JTAG/serial debug unit</code>) and confirm.</li>
+    </ol>
+    <p style="margin-top:16px">
+      <esp-web-install-button manifest="manifest.json">
+        <button slot="activate">Connect &amp; install</button>
+        <span slot="unsupported" class="warn">This browser cannot flash. Use Chrome or Edge on a desktop.</span>
+        <span slot="not-allowed" class="warn">Flashing needs a secure (https) page.</span>
+      </esp-web-install-button>
+    </p>
+    <p>Both boards get the <b>same</b> firmware. Which one is the basement node and which one the gateway is chosen
+      afterwards on the setup page.</p>
+  </div>
+
+  <div class="card">
+    <h2>Fresh install or re-flash?</h2>
+    <p>The installer asks whether to <b>erase the device</b>. Tick it for a new board or to start over. Leave it
+      unticked to keep the settings and pairing of a board that was already set up.</p>
+  </div>
+
+  <div class="card">
+    <h2>Board not found?</h2>
+    <ol>
+      <li>Hold <b>BOOT</b>, press and release <b>RST</b>, then release BOOT. The board is now in download mode.</li>
+      <li>Try again. When it finishes, press <b>RST</b> once so the new firmware starts.</li>
+      <li>Still nothing: try another cable. Many USB-C cables only carry power.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Later updates</h2>
+    <p>You do not need this page again. Updates go over WiFi: open the board's web page → <b>System</b> →
+      <b>Firmware-Update</b> and upload the <code>…-update.bin</code> from the
+      <a href="https://github.com/uniplayer1/lora-power-meter-bridge/releases/latest">latest release</a>.</p>
+  </div>
+</main>
+<script>
+  fetch('manifest.json').then(r => r.json()).then(m => {
+    document.getElementById('version').textContent = 'Version ' + m.version + ' · LilyGO T3-S3 · SX1262';
+  }).catch(() => {});
+</script>
+</body>
+</html>
