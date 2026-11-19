@@ -265,6 +265,24 @@ TEST_CASE("the framer delivers a telegram this long instead of overflowing") {
   TEST_ASSERT_TRUE(values.crcOk);
 }
 
+// The framing check exists so that "no values" can be told apart from "no data":
+// a telegram that frames and checks out but decodes to nothing is a parser gap,
+// one that does not frame is a wire, timing or buffer problem.
+TEST_CASE("the framing check accepts a real telegram and rejects a broken one") {
+  TEST_ASSERT_TRUE(
+      smlFramingOk(fixtures::kEasymeterQ3Telegram, fixtures::kEasymeterQ3TelegramLen));
+
+  const SmlBuildEntry entry[] = {{kObisImportTotal, 4200LL, -1, kUnitWh}};
+  uint8_t telegram[128];
+  const size_t len = buildSmlTelegram(entry, 1, telegram, sizeof(telegram));
+  TEST_ASSERT_TRUE(smlFramingOk(telegram, len));
+
+  telegram[len - 1] ^= 0xFF;  // CRC no longer matches
+  TEST_ASSERT_FALSE(smlFramingOk(telegram, len));
+  TEST_ASSERT_FALSE(smlFramingOk(fixtures::kEasymeterQ3Telegram, 40));  // truncated
+  TEST_ASSERT_FALSE(smlFramingOk(nullptr, 0));
+}
+
 TEST_CASE("a standard-layout telegram still frames and verifies") {
   // The layout the builder writes: CRC straight after the end marker, no filler
   // byte. The framer now takes one byte more than that needs, so this pins down

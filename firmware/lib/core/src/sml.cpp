@@ -240,6 +240,25 @@ void SmlFramer::reset() {
   trailerLen_ = 0;
 }
 
+bool smlFramingOk(const uint8_t* telegram, size_t len) {
+  if (telegram == nullptr || len < sizeof(kStartMarker) + sizeof(kEndMarker) + 2) return false;
+  if (memcmp(telegram, kStartMarker, sizeof(kStartMarker)) != 0) return false;
+  const size_t endIndex = findEndMarker(telegram, len, sizeof(kStartMarker));
+  if (endIndex >= len) return false;
+  const size_t crcIndex = endIndex + sizeof(kEndMarker);
+  for (size_t shift = 0; shift <= 1; ++shift) {
+    const size_t covered = crcIndex + shift;
+    if (covered + 2 > len) break;
+    const uint16_t expected = crc16X25Finish(crc16X25(telegram, covered));
+    const uint16_t littleEndian =
+        static_cast<uint16_t>(telegram[covered] | (telegram[covered + 1] << 8));
+    const uint16_t bigEndian =
+        static_cast<uint16_t>((telegram[covered] << 8) | telegram[covered + 1]);
+    if (littleEndian == expected || bigEndian == expected) return true;
+  }
+  return false;
+}
+
 bool parseSml(const uint8_t* telegram, size_t len, MeterValues& out, SmlParseStats* stats) {
   SmlParseStats local;
   SmlParseStats& st = stats ? *stats : local;

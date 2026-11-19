@@ -1037,7 +1037,27 @@ async function poll() {
     if (!res.ok) throw new Error('http ' + res.status);
     state = await res.json();
     render();
-  } catch (e) { /* keep the last good state */ }
+    showBuildBanner(false);
+  } catch (e) {
+    // A build whose state does not parse shows as nothing at all: every field "–".
+    // Say why instead of leaving the page looking like a dead device.
+    showBuildBanner(true, e);
+  }
+}
+
+// A one-line banner for exactly that case. It is about the page, not the device,
+// so it stays out of the way as soon as a state parses again.
+function showBuildBanner(broken, err) {
+  let el = $('buildBanner');
+  if (!broken) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'buildBanner';
+    el.className = 'card bad-card';
+    document.querySelector('.wrap').prepend(el);
+  }
+  el.textContent = 'Die Firmware meldet ihren Zustand fehlerhaft – die Seite kann ihn nicht lesen. ' +
+    'Betroffen ist nur diese Anzeige, nicht die Messung. Bitte ein neueres Update einspielen.';
 }
 
 function selectTab(name) {

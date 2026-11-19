@@ -364,9 +364,8 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   }
   // Whether the code from the display is hidden there, and whether the owner set
   // a dashboard password of their own. Neither password itself is ever sent.
-  j += "\"hide_code\":" + String(cfg.hideCodeOnDisplay ? "true" : "false") + ",";
+    j += ",\"hide_code\":" + String(cfg.hideCodeOnDisplay ? "true" : "false") + ",";
   j += "\"web_password_custom\":" +
-       String(strcmp(cfg.webPassword, cfg.apPassword) == 0 ? "false" : "true");
   j += ",\"can_configure\":" + String(canConfigure ? "true" : "false");
   j += "},";
 
@@ -487,6 +486,7 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += "\"crc_errors\":" + String(ms.crcErrors) + ",";
   j += "\"parse_errors\":" + String(ms.parseErrors) + ",";
   j += "\"overflow_errors\":" + String(ms.overflowErrors) + ",";
+  j += "\"unframed_errors\":" + String(ms.unframedErrors) + ",";
   j += "\"d0_sessions\":" + String(ms.d0Sessions) + ",";
   // Raw byte count on the meter wire: zero means nothing is driving the pin at
   // all, which is a different fault from "bytes arrive but do not decode".
@@ -906,6 +906,12 @@ void WebUi::handleOtaUpload() {
   if (upload.status == UPLOAD_FILE_START) {
     logEvent("OTA: %s", upload.filename.c_str());
     otaRejected_ = false;
+    otaTooLarge_ = false;
+    // HTTPUpload carries no content length in this core, so the request header
+    // is the only place to learn the size before the bytes arrive. It is the
+    // multipart body, a few hundred bytes above the image - close enough to
+    // refuse an image that cannot fit, and never too small to catch one that can.
+    otaExpectedBytes_ = static_cast<size_t>(server_.header("Content-Length").toInt());
     // A release ships two images: "-update.bin" (the app, for this page) and
     // "-factory.bin" (bootloader + partition table + app, for a USB flash at
     // 0x0). The factory image is the easy one to pick by mistake, and written
@@ -923,11 +929,33 @@ void WebUi::handleOtaUpload() {
     }
   } else if (otaRejected_) {
     return;  // the rest of a refused upload is read and dropped
+  } else if (otaTooLarge_) {
+    return;  // the rest of an image that does not fit is read and dropped
+    } else if (upload.status == UPLOAD_FILE_WRITE && otaExpectedBytes_ > 0 &&
+             upload.totalSize + upload.currentSize > ESP.getFreeSketchSpace()) {
+    // Caught while it streams: refusing at the end would already have filled the
+    // inactive slot with bytes that can never boot.
+    otaTooLarge_ = true;
+    Update.abort();
+    logEvent("OTA refused: upload exceeds the %u-byte slot",
+             static_cast<unsigned>(ESP.getFreeSketchSpace()));
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       logEvent("OTA: write failed (%s)", Update.errorString());
     }
   } else if (upload.status == UPLOAD_FILE_END) {
+    // An image that does not fit the inactive slot must never be booted. Update
+    // checks the size too, but the failure has to reach the owner in words: a
+    // botched update used to look like a settings reset, because what came up
+    // afterwards was the empty configuration the half-written image had left.
+    const size_t slot = ESP.getFreeSketchSpace();
+    if (upload.totalSize > slot) {
+      otaTooLarge_ = true;
+      Update.abort();
+      logEvent("OTA refused: %u bytes do not fit the %u-byte slot",
+               static_cast<unsigned>(upload.totalSize), static_cast<unsigned>(slot));
+      return;
+    }
     if (Update.end(true)) {
       logEvent("OTA: %u bytes written, restarting", upload.totalSize);
     } else {
@@ -939,6 +967,16 @@ void WebUi::handleOtaUpload() {
 void WebUi::handleOtaDone() {
   if (!mayConfigure()) {
     sendJson(401, "{\"ok\":false,\"message\":\"Nicht angemeldet\"}");
+    return;
+  }
+  if (otaTooLarge_) {
+    otaTooLarge_ = false;
+    server_.send(400, "text/html",
+                 "<meta charset='utf-8'><meta http-equiv='refresh' content='15;url=/#system'>"
+                 "<body style='background:#070b18;color:#f87171;font-family:sans-serif;padding:40px'>"
+                 "<h2>Zu gross</h2><p>Die Datei passt nicht in den freien Speicher f&uuml;r das Update. "
+                 "Es wurde nichts geschrieben &ndash; die laufende Firmware und alle Einstellungen "
+                 "bleiben unver&auml;ndert.</p></body>");
     return;
   }
   if (otaRejected_) {

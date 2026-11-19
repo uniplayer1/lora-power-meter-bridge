@@ -84,5 +84,7 @@ class WebUi {
   bool netChangeAp_ = false;  // the AP name or code changed as well
   uint8_t failedLogins_ = 0;
   bool otaRejected_ = false;  // the upload in progress is the wrong image
+  bool otaTooLarge_ = false;      // ...or does not fit the inactive app slot
+  size_t otaExpectedBytes_ = 0;   // Content-Length of the upload in progress
   uint32_t lastFailedLoginMs_ = 0;
 };

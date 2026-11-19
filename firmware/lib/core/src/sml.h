@@ -99,6 +99,14 @@ struct SmlParseStats {
 
 // Parses one complete telegram (start marker .. CRC inclusive). Returns true
 // when at least one OBIS value was extracted.
+
+// Checks the framing alone, without decoding a single entry: the start marker and
+// the end marker are where they belong, and the CRC over everything up to it
+// matches (with or without the filler byte some meters insert). A telegram whose
+// entries no longer decode but whose framing is intact is a parser gap; one whose
+// framing is broken is a wire, timing or buffer-size problem. Telling those two
+// apart is the whole point of having this as its own function.
+bool smlFramingOk(const uint8_t* telegram, size_t len);
 bool parseSml(const uint8_t* telegram, size_t len, MeterValues& out,
               SmlParseStats* stats = nullptr);
 

@@ -391,6 +391,12 @@ void MeterReader::onTelegramComplete() {
   } else {
     ++stats_.parseErrors;
     ++values_.parseErrors;
+      if (core::smlFramingOk(framer_.data(), framer_.size())) {
+      ++stats_.unframedErrors;
+      if (stats_.unframedErrors == 1) {
+        logEvent("meter: telegram framed (markers + CRC ok) but no value decoded - grammar gap");
+      }
+    }
   }
 }
 
@@ -703,6 +709,8 @@ void MeterReader::dumpTelegram(String& out) const {
   out += "\n";
   out += "overflows=";
   out += String(stats_.overflowErrors);
+  out += " unframed=";
+  out += String(stats_.unframedErrors);
   out += "\n";
   out += "entries=";
   out += String(lastParseStats_.entries);

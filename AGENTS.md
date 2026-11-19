@@ -38,6 +38,13 @@
 - The USB CDC is not bidirectional the instant the host opens the port.
   `tools/e2e.py` probes with `help` until the board answers; do the same in any
   new harness before concluding the firmware is broken.
+- **`/api/state` is a hand-built JSON string, and one missing comma empties the
+  whole dashboard.** The page's poll keeps the last good state on a parse error,
+  so a malformed document shows every field as "–" and looks exactly like a
+  device whose settings were wiped. After touching `buildStateJson()`, fetch the
+  document and parse it (`curl -s <ip>/api/state | python3 -m json.tool`); the
+  page now also raises a banner when it cannot parse. The device itself keeps
+  measuring normally while this is broken.
 
 ## Firmware layout
 
@@ -52,6 +59,13 @@
   from an access point without internet. Its header comment lists the layout
   rules (cards, `.actions`, `.pair`, `data-only` per role); keep to them instead
   of adding inline styles.
+- **The in-page update (`System` → `Firmware-Update`) keeps the settings.** It
+  writes only the inactive app slot; NVS, pairing and the WiFi configuration are
+  untouched. When an update *does* look like it wiped the configuration, it is
+  almost always one of three things, in this order: the state document no longer
+  parses (web page empty, device fine), the `DeviceConfig` layout changed without
+  appending at the end (see the comment in `app_config.h`), or a factory image was
+  written where an `-update.bin` belongs.
 - Releases come from CI: tag `v<VERSION>` → `.github/workflows/ci.yml` builds,
   `tools/make_release.py` packages (update / factory / browser-flasher parts),
   and the release plus the GitHub Pages flasher are published. The release

@@ -27,6 +27,10 @@ struct MeterStats {
   // Telegrams that did not fit the framer buffer. Zero on a healthy install;
   // non-zero means the meter sends longer telegrams than the buffer allows.
   uint32_t overflowErrors = 0;
+  // Framed correctly (markers and CRC) but no entry could be decoded. This is the
+  // counter that separates "the wire is fine, the parser does not know this
+  // meter's grammar" from "nothing usable ever arrived".
+  uint32_t unframedErrors = 0;
   uint32_t lastTelegramAtMs = 0;
   uint32_t bytesSeen = 0;
   uint32_t d0Sessions = 0;
