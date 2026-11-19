@@ -122,6 +122,17 @@ constexpr uint8_t kSparePin2 = 21;
 // using - down with it on every single join.
 #define STA_STABLE_MS (120UL * 1000UL)
 
+// ── Time ─────────────────────────────────────────────────────
+// Wall-clock time comes from NTP on a board with internet access (normally the
+// gateway) and is passed to the other board over the link.
+#define TIME_ZONE_POSIX "CET-1CEST,M3.5.0,M10.5.0/3"  // Europe/Berlin
+#define NTP_SERVER_1 "pool.ntp.org"
+#define NTP_SERVER_2 "time.cloudflare.com"
+// How often the board with internet time re-sends it. A crystal drifts well
+// under a second in that time; the sync costs about 70 ms of airtime.
+#define TIME_SYNC_INTERVAL_MS (6UL * 60UL * 60UL * 1000UL)
+#define TIME_SYNC_RETRY_MS (30UL * 1000UL)
+
 // ── Meter ────────────────────────────────────────────────────
 #define METER_SML_BAUD 9600
 #define METER_D0_WAKE_BAUD 300

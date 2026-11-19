@@ -6,6 +6,7 @@
 #include "firmware_version.h"
 #include "net.h"
 #include "time_util.h"
+#include "wall_clock.h"
 
 void DisplayUi::begin() {
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -75,9 +76,18 @@ void DisplayUi::drawHeader(const char* title) {
   if (millis() < 30000) {
     snprintf(right, sizeof(right), "%u/%u BOOT-Taste", page_ + 1, kPageCount);
   } else {
-    snprintf(right, sizeof(right), "%u/%u", page_ + 1, kPageCount);
+    // The time of day next to the page counter, once the clock is set.
+    char clock[8];
+    clockFormat(clock, sizeof(clock), "%H:%M");
+    if (clock[0]) {
+      snprintf(right, sizeof(right), "%s %u/%u", clock, page_ + 1, kPageCount);
+    } else {
+      snprintf(right, sizeof(right), "%u/%u", page_ + 1, kPageCount);
+    }
   }
-  display_.drawStr(128 - 7 * strlen(right), 10, right);
+  // Measured, not estimated: with the clock in it the text is long enough that
+  // a per-character guess ran into the page title.
+  display_.drawStr(128 - display_.getStrWidth(right), 10, right);
   display_.drawHLine(0, 13, 128);
 }
 

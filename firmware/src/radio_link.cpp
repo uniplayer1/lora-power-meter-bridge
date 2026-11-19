@@ -311,6 +311,7 @@ void RadioLink::markPaired(uint16_t peerId, uint32_t nowMs) {
   if (newPeer) {
     stats_.peerOnline = false;
     stats_.lastPeerSeenMs = 0;
+    peerUptimeKnown_ = false;
   }
   heartbeatDueMs_ = nowMs + 1500;
   if (heartbeatDueMs_ == 0) heartbeatDueMs_ = 1;
@@ -507,6 +508,14 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
   // could never fire because every stranger's packet re-armed it.
   const bool fromPeer = peerId_ != 0 && packet.src == peerId_;
   if (fromPeer) {
+    // Every frame carries the sender's uptime in its header: when it goes
+    // backwards, the peer has restarted.
+    if (peerUptimeKnown_ && packet.uptimeS + 2 < peerUptimeS_) {
+      peerRestarted_ = true;
+      logEvent("peer %04X restarted", packet.src);
+    }
+    peerUptimeS_ = packet.uptimeS;
+    peerUptimeKnown_ = true;
     stats_.peerOnline = true;
     stats_.lastPeerSeenMs = nowMs;
     stats_.peerRssi = stats_.lastRssi;

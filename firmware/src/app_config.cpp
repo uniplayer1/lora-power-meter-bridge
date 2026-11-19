@@ -6,6 +6,7 @@
 #include <stdarg.h>
 
 #include "firmware_version.h"
+#include "wall_clock.h"
 
 ConfigStore configStore;
 core::RingLog<String, LOG_CAPACITY> eventLog;
@@ -39,8 +40,12 @@ void logEvent(const char* fmt, ...) {
   vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
 
-  eventLog.push(String(buffer));
-  Serial.printf("[EVT] %s\n", buffer);
+  // Stamped with the time of day once the clock is set; before that the log
+  // has only its order to go by.
+  char stamp[12];
+  clockFormat(stamp, sizeof(stamp), "%H:%M:%S ");
+  eventLog.push(String(stamp) + buffer);
+  Serial.printf("[EVT] %s%s\n", stamp, buffer);
 }
 
 namespace {

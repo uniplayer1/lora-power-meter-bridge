@@ -44,6 +44,14 @@ boards then show the same four-digit *Kontrollzahl* (web page and display),
 derived from the secret, so the owner can see that nobody sat in the middle of
 the exchange. Only the pairing request and answer travel in the clear.
 
+Time of day comes from the internet (NTP, time zone Europe/Berlin) on the board
+that is in the home WLAN, normally the gateway. It passes the time to the other
+board over the link: when the link comes up, after the other board restarts,
+and every 6 hours (about 70 ms of airtime each). The receiver adds the frame's
+airtime back, so both clocks agree to well under a second. The time stamps the
+event log, shows on the display and under *System*. Ages and timeouts never
+depend on it, and Home Assistant stamps readings with its own clock.
+
 ## Hardware
 
 - 2 × **LilyGO T3-S3** (ESP32-S3, SX1262 868 MHz, 4 MB flash, OLED)
@@ -139,7 +147,8 @@ polls it and its sensors have no way to log in. Nothing that *changes* the devic
 is reachable without a session. Response shape:
 
 ```
-device  name, role, fw, mac, uptime, heap, can_configure
+device  name, role, fw, mac, uptime, heap, time, time_source, time_synced_s,
+        can_configure
 radio   freq_mhz, sf, cr, power_dbm, interval_ms (+ legal min/max)
 wifi    mode, state, connected, ip, ap_ssid, ap_up, setup_code*, rssi, portal
 link    radio, peer, paired, net, rssi, snr, age, encrypted, duty_pct, tx, rx,

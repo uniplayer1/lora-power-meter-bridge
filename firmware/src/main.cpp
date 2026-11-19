@@ -27,6 +27,8 @@
 #include "meter_reader.h"
 #include "net.h"
 #include "radio_link.h"
+#include "time_util.h"
+#include "wall_clock.h"
 #include "web_server.h"
 
 // These two are referenced from other translation units (the web UI drives the
@@ -41,6 +43,9 @@ MeterReader meterReader;
 WebUi webUi;
 
 uint32_t lastSendMs = 0;
+uint32_t lastTimeSyncMs = 0;
+uint32_t lastTimeSyncTryMs = 0;
+bool timePeerWasOnline = false;
 uint32_t lastIdentityMs = 0;
 
 // LED: solid when everything works, slow blink without a peer, fast blink when
@@ -91,6 +96,19 @@ void handleInbound(const core::Packet& packet, uint32_t now) {
     case core::PacketType::Status:
       break;  // liveness only; the link layer already tracked it
 
+    case core::PacketType::TimeSync: {
+      // Seconds and milliseconds since 1970 (UTC), taken just before the frame
+      // went on air. Its airtime is added back: at SF7 that is ~70 ms, at SF12
+      // over a second - far more than any other error in the chain.
+      if (packet.payloadLen < 6) break;
+      const uint64_t seconds = core::getLe(packet.payload, 4);
+      const uint64_t millisPart = core::getLe(packet.payload + 4, 2);
+      const uint32_t airtime =
+          radioLink.estimatedAirtimeMs(core::kHeaderSize + packet.payloadLen + core::kLinkTagSize);
+      clockSetFromRadio(seconds * 1000ULL + millisPart + airtime);
+      break;
+    }
+
     default:
       break;
   }
@@ -127,6 +145,39 @@ void schedulerTick(uint32_t now) {
   }
 }
 
+// A board that has internet time passes it on: when the link comes up, when
+// the other board has restarted, and every few hours against drift. Sealed like
+// every other frame, so only the paired board can set the clock.
+void timeSyncTick(uint32_t now) {
+  const LinkStats& link = radioLink.stats();
+  const bool restarted = radioLink.takePeerRestarted();
+  if (clockSource() != ClockSource::Ntp || !link.peerOnline || !radioLink.encryptionEnabled()) {
+    timePeerWasOnline = false;
+    return;
+  }
+  const bool due = !timePeerWasOnline || restarted || lastTimeSyncMs == 0 ||
+                   olderThan(now, lastTimeSyncMs, TIME_SYNC_INTERVAL_MS);
+  timePeerWasOnline = true;
+  if (!due) return;
+  if (lastTimeSyncTryMs != 0 && !olderThan(now, lastTimeSyncTryMs, TIME_SYNC_RETRY_MS) && !restarted) {
+    return;
+  }
+  lastTimeSyncTryMs = now;
+  const uint64_t epochMs = clockEpochMs();
+  if (epochMs == 0) return;
+  uint8_t payload[6];
+  core::putLe(payload, epochMs / 1000ULL, 4);
+  core::putLe(payload + 4, epochMs % 1000ULL, 2);
+  if (radioLink.send(core::PacketType::TimeSync, payload, sizeof(payload), configStore.get().peerShortId,
+                     false)) {
+    lastTimeSyncMs = now;
+  } else {
+    // Refused by the airtime budget or the radio: the retry gate above tries
+    // again in half a minute.
+    timePeerWasOnline = false;
+  }
+}
+
 void logIdentity() {
   const DeviceConfig& cfg = configStore.get();
   logEvent("%s role=%s name='%s' mac=%s code=%s ap=%s", FW_ID,
@@ -159,6 +210,7 @@ void setup() {
   radioLink.begin(configStore.get());
   meterReader.begin(configStore.get());
   netBegin();
+  clockBegin();
   haMqtt.begin(configStore.get());
   webUi.begin(&radioLink, &meterReader);
   displayUi.attach(&radioLink, &meterReader);
@@ -184,6 +236,8 @@ void loop() {
   while (radioLink.popReceived(packet)) handleInbound(packet, now);
 
   schedulerTick(now);
+  clockLoop();
+  timeSyncTick(millis());
   updateLed(now);
 
   // Identity line: makes the board findable on the serial console and proves to

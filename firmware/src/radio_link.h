@@ -107,6 +107,13 @@ class RadioLink {
   // simply answers the next request again).
   void clearPairing();
   bool paired() const;
+  // True once after the peer restarted (its uptime went backwards), so whatever
+  // state it lost - the wall-clock time, for one - can be sent again.
+  bool takePeerRestarted() {
+    const bool restarted = peerRestarted_;
+    peerRestarted_ = false;
+    return restarted;
+  }
   const char* pairStateName() const;
   uint32_t pairingTimeoutMs() const { return PAIRING_TIMEOUT_MS; }
 
@@ -173,6 +180,9 @@ class RadioLink {
   uint8_t pendingSecret_[core::kLinkSecretSize] = {0};
   uint8_t pendingKey_[core::kLinkKeySize] = {0};
   bool pendingKeyValid_ = false;
+  uint32_t peerUptimeS_ = 0;
+  bool peerUptimeKnown_ = false;
+  bool peerRestarted_ = false;
   // The confirmation closes the handshake and is the one frame whose loss
   // leaves the two ends disagreeing, so it is repeated a few times.
   uint8_t confirmsLeft_ = 0;

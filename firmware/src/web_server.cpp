@@ -10,6 +10,7 @@
 #include "ha_mqtt.h"
 #include "json_util.h"
 #include "net.h"
+#include "wall_clock.h"
 #include "time_util.h"
 #include "web_assets.h"
 
@@ -347,6 +348,15 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += "\",\"fw\":\"" FW_ID "\",\"mac\":\"" + String(configStore.macString()) + "\",";
   j += "\"uptime\":" + String(now / 1000) + ",\"heap\":" + String(ESP.getFreeHeap());
   j += ",\"host\":\"" + netHostName() + ".local\"";
+  // Wall clock: seconds since 1970 (null while unset), where it came from, and
+  // how long ago it was last synchronised.
+  {
+    const uint64_t epochMs = clockEpochMs();
+    j += ",\"time\":" + (epochMs ? String(static_cast<unsigned long>(epochMs / 1000ULL)) : String("null"));
+    j += ",\"time_source\":\"" + String(clockSourceName()) + "\"";
+    const uint32_t synced = clockSyncedAtMs();
+    j += ",\"time_synced_s\":" + (epochMs && synced ? String(ageSeconds(now, synced)) : String("null"));
+  }
   // Whether the dashboard password is still the code from the display. The
   // password itself is never sent anywhere.
   j += ",\"web_password_custom\":" +

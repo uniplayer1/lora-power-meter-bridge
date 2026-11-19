@@ -620,6 +620,7 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
           <div class="row"><span>MAC</span><span id="s-mac" class="mono">–</span></div>
           <div class="row"><span>Freier Speicher</span><span id="s-heap">–</span></div>
           <div class="row"><span>Laufzeit</span><span id="s-up">–</span></div>
+          <div class="row"><span>Uhrzeit</span><span id="s-time">–</span></div>
         </div>
         <label for="devname">Name</label><input id="devname" data-sync maxlength="27">
         <div class="actions">
@@ -953,6 +954,15 @@ function render() {
 
   // System
   set('s-fw', d.fw); set('s-mac', d.mac); set('s-heap', Math.round(d.heap / 1024) + ' kB'); set('s-up', fmtDuration(d.uptime));
+  if (d.time) {
+    // The device's own clock, so a wrong one is visible next to the phone's.
+    const t = new Date(d.time * 1000).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'medium' });
+    const src = d.time_source === 'ntp' ? 'aus dem Internet' : 'vom gekoppelten Gerät';
+    set('s-time', t + ' (' + src + (d.time_synced_s !== null && d.time_synced_s !== undefined ? ', abgeglichen ' + ago(d.time_synced_s) : '') + ')');
+  } else {
+    set('s-time', d.role === 'gateway' ? 'noch nicht gestellt – kommt aus dem Internet, sobald das WLAN verbunden ist'
+      : 'noch nicht gestellt – kommt vom Wohnungs-Gerät, sobald die Funkstrecke steht');
+  }
   fill('devname', d.name);
   set('pw-state', d.web_password_custom ? 'eigenes' : 'Code vom Display');
   if (state.oled) {
