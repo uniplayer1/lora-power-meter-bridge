@@ -15,8 +15,18 @@
 // `apClient` and `canConfigure` decide which values are allowed out: the setup
 // code and the link secret only leave over the device's own access point, and
 // the MQTT bridge is off-device, so it passes false, false.
-String buildStateJson(const RadioLink& link, const MeterReader& meter, bool apClient,
-                      bool canConfigure);
+//
+// It is written into `out`, which should be stateJsonBuffer(): reserved once at
+// boot and reused, so building the document every few seconds never allocates.
+// Building it as a fresh String with ~200 appends fragmented the heap until no
+// block was large enough - the page then got an empty or cut-off document and
+// showed nothing, while the radio and the display carried on. Returns false
+// when the document did not fit (out of memory); `out` is then unusable.
+// MQTT leaves the event log out (`includeLog`): it is not state, and it would
+// not fit the broker message.
+bool buildStateJson(String& out, const RadioLink& link, const MeterReader& meter, bool apClient,
+                    bool canConfigure, bool includeLog = true);
+String& stateJsonBuffer();
 
 class WebUi {
  public:

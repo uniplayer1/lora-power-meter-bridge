@@ -9,7 +9,7 @@
 #include "wall_clock.h"
 
 ConfigStore configStore;
-core::RingLog<String, LOG_CAPACITY> eventLog;
+core::RingLog<LogLine, LOG_CAPACITY> eventLog;
 
 namespace {
 
@@ -44,7 +44,9 @@ void logEvent(const char* fmt, ...) {
   // has only its order to go by.
   char stamp[12];
   clockFormat(stamp, sizeof(stamp), "%H:%M:%S ");
-  eventLog.push(String(stamp) + buffer);
+  LogLine line;
+  snprintf(line.text, sizeof(line.text), "%s%s", stamp, buffer);
+  eventLog.push(line);
   Serial.printf("[EVT] %s%s\n", stamp, buffer);
 }
 

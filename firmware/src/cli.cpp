@@ -198,8 +198,8 @@ void handleCommand(const String& line, RadioLink& link, MeterReader& meter) {
   } else if (cmd == "log") {
     Serial.printf("event log: %u entries (oldest first)\n", static_cast<unsigned>(eventLog.size()));
     for (size_t i = 0; i < eventLog.size(); ++i) {
-      String line;
-      if (eventLog.at(i, line)) Serial.printf("  %s\n", line.c_str());
+      LogLine line;
+      if (eventLog.at(i, line)) Serial.printf("  %s\n", line.text);
     }
   } else if (cmd == "webpass" || cmd.startsWith("webpass ")) {
     DeviceConfig& cfg = configStore.mutableGet();

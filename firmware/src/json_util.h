@@ -9,6 +9,28 @@
 
 #include <stdio.h>
 
+// Appends `in` escaped, without building a temporary String.
+inline void appendJsonEscaped(String& out, const char* in) {
+  for (; *in; ++in) {
+    const char c = *in;
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': break;
+      case '\t': out += ' '; break;
+      default:
+        if (static_cast<uint8_t>(c) < 0x20) {
+          char buf[8];
+          snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out += buf;
+        } else {
+          out += c;
+        }
+    }
+  }
+}
+
 inline String escapeJson(const String& in) {
   String out;
   out.reserve(in.length() + 8);
