@@ -34,6 +34,10 @@ const D0Obis kD0Obis[] = {
     {"71.7.0", core::kObisCurrentL3, core::kUnitA},
 };
 
+// Candidate pins for the pin search: the free header pins plus the QWIIC pair,
+// most likely first. Only used while no telegram has ever been parsed.
+const uint8_t kHuntPins[] = {39, 40, 38, 42, 41, 43, 44, 15, 16, 21, 10};
+
 uint8_t unitFromToken(const char* token, size_t len) {
   auto eq = [&](const char* name) {
     return len == strlen(name) && strncmp(token, name, len) == 0;
@@ -208,6 +212,29 @@ void MeterReader::openPort(uint32_t baud, uint32_t serialConfig) {
   serial_.setRxInvert(stats_.invertedNow);
 }
 
+bool MeterReader::huntNextPin(uint32_t nowMs) {
+  while (huntIndex_ < sizeof(kHuntPins)) {
+    const uint8_t candidate = kHuntPins[huntIndex_++];
+    if (candidate == rxPin_ || candidate == txPin_ || !meterPinAllowed(candidate)) continue;
+    if (portOpen_) serial_.end();
+    delay(20);
+    rxPin_ = candidate;
+    // Deliberately not setPins(): that would persist every guess. The pin that
+    // actually produces a telegram is saved once it is known - see
+    // onTelegramComplete().
+    openPort(baud_, SERIAL_8N1);
+    portOpen_ = true;
+    framer_.reset();
+    polarityFlipped_ = false;
+    detectionStartedAtMs_ = nowMs;
+    applyPolarity();
+    logEvent("meter: no telegram yet - listening on rx=GPIO%d", candidate);
+    return true;
+  }
+  huntIndex_ = 0;
+  return false;
+}
+
 bool MeterReader::setPins(uint8_t rxPin, uint8_t txPin) {
   if (!meterPinAllowed(rxPin) || !meterPinAllowed(txPin) || rxPin == txPin) return false;
 
@@ -222,6 +249,11 @@ bool MeterReader::setPins(uint8_t rxPin, uint8_t txPin) {
   openPort(baud_, SERIAL_8N1);
   portOpen_ = true;
   d0Stage_ = 0;
+  // A pin the owner picked on purpose wins over the search: start the hunt over,
+  // so a head that is still silent here gets another pass through the other pins
+  // instead of staying on a pin that was already tried.
+  hunting_ = false;
+  huntIndex_ = 0;
   detectionStartedAtMs_ = millis();
   logEvent("meter UART moved to rx=%d tx=%d", rxPin_, txPin_);
   return true;
@@ -251,6 +283,8 @@ void MeterReader::setProtocol(MeterProtocol protocol) {
   wantedProtocol_ = protocol;
   stats_.activeProtocol = protocol;
   polarityFlipped_ = false;
+  hunting_ = false;
+  huntIndex_ = 0;
   detectionStartedAtMs_ = millis();
   d0Stage_ = 0;
   applyPolarity();
@@ -300,8 +334,18 @@ void MeterReader::feedByte(uint8_t byte) {
   rawTail_[rawTotal_ % kRawTail] = byte;
   ++rawTotal_;
 
-  if (framer_.feed(byte) == core::SmlFramer::Result::Telegram) {
+  const core::SmlFramer::Result result = framer_.feed(byte);
+  if (result == core::SmlFramer::Result::Telegram) {
     onTelegramComplete();
+  } else if (result == core::SmlFramer::Result::Overflow) {
+    // A telegram longer than the framer buffer looks exactly like a silent line
+    // from the outside: no telegram, no parse error, only bytes. Count it, and
+    // say so once, so the diagnosis does not depend on guessing.
+    ++stats_.overflowErrors;
+    if (stats_.overflowErrors == 1) {
+      logEvent("meter: telegram longer than %u bytes - framer buffer too small",
+               static_cast<unsigned>(core::SmlFramer::kMaxTelegram));
+    }
   }
 }
 
@@ -334,6 +378,16 @@ void MeterReader::onTelegramComplete() {
     if (!parsed.crcOk) ++stats_.crcErrors;
     stats_.activeProtocol = MeterProtocol::Sml;
     stats_.parseErrors += 0;
+    // A parsed telegram is proof that this pin carries the head: keep it, so the
+    // search never has to run again on this device.
+    if (hunting_ && !stats_.simulating) {
+      hunting_ = false;
+      DeviceConfig& cfg = configStore.mutableGet();
+      cfg.meterRxPin = rxPin_;
+      cfg.meterTxPin = txPin_;
+      configStore.save();
+      logEvent("meter: read head found on rx=GPIO%d - saved", rxPin_);
+    }
   } else {
     ++stats_.parseErrors;
     ++values_.parseErrors;
@@ -417,6 +471,27 @@ void MeterReader::runDetection(uint32_t nowMs) {
     logEvent("meter: %lu bytes in %lus, trying the inverted polarity",
              static_cast<unsigned long>(stats_.bytesSeen),
              static_cast<unsigned long>(METER_LISTEN_MS / 1000));
+    return;
+  }
+
+  // Both polarities stayed silent on the configured pin. In practice that is
+  // almost always the wiring: the read head sits on different header pins than
+  // the default, and from the outside it looks exactly like a dead head. Rather
+  // than leave the owner to discover that, walk the free pins - the first one
+  // that completes a telegram is adopted and saved.
+  if (hunting_) {
+    if (nowMs - detectionStartedAtMs_ < METER_HUNT_MS) return;
+    if (huntNextPin(nowMs)) return;
+    hunting_ = false;  // the whole list was tried once
+    logEvent("meter: no telegram on any pin - back to protocol detection");
+  } else if (stats_.telegrams == 0 && huntIndex_ == 0) {
+    // Once per boot: the search is for a head that is plugged into other pins
+    // than the configured ones, not a loop that keeps moving the UART away from a
+    // working meter. A telegram clears hunting_ and saves the pin it arrived on.
+    hunting_ = true;
+    huntIndex_ = 0;
+    detectionStartedAtMs_ = nowMs;
+    logEvent("meter: nothing on GPIO%d in either polarity - searching the other pins", rxPin_);
     return;
   }
 
@@ -625,6 +700,9 @@ void MeterReader::dumpTelegram(String& out) const {
     out += byte;
     if ((i + 1) % 24 == 0) out += "\n";
   }
+  out += "\n";
+  out += "overflows=";
+  out += String(stats_.overflowErrors);
   out += "\n";
   out += "entries=";
   out += String(lastParseStats_.entries);

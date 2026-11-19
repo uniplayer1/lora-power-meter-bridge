@@ -15,14 +15,16 @@
 // variant besides 10 and 21. They are only free because the board JSON moves
 // Serial to the native USB CDC (ARDUINO_USB_CDC_ON_BOOT) - without that they
 // are UART0 and the console owns them.
-// Defaults for a board whose read head is wired to the expansion header, where
-// IO40/IO41 are free: GPIO43/44 sit on the QWIIC connector, which not every
-// installation has. Both are JTAG pads that the ESP32-S3 only uses if an
-// external probe is attached - the built-in USB-Serial/JTAG runs on GPIO19/20,
-// so flashing and the console are unaffected. Still settable at runtime; these
-// are just what a factory reset falls back to.
-#define METER_UART_RX_PIN 40  // read head data out -> node RX
-#define METER_UART_TX_PIN 41  // node TX -> read head (D0 wake-up only)
+// Defaults for the wired installation: the read head sits on the IO39/IO40 pair
+// of the expansion header, data out on IO39. (GPIO43/44 are the QWIIC "Uart1"
+// pins and work as well, they are simply not where the head is mounted here.)
+// All of 38..42 are ESP32-S3 JTAG pads that the chip only uses if an external
+// probe is attached - the built-in USB-Serial/JTAG runs on GPIO19/20, so
+// flashing and the console are unaffected. Still settable at runtime; these are
+// just what a factory reset falls back to. If the head ends up on other pins
+// after all, the reader finds and saves it by itself - see MeterReader::runDetection().
+#define METER_UART_RX_PIN 39  // read head data out -> node RX
+#define METER_UART_TX_PIN 40  // node TX -> read head (D0 wake-up only)
 #define METER_UART_NUM 1
 
 // Which pins may carry the meter UART. The ESP32-S3 can route a UART almost
@@ -144,6 +146,10 @@ constexpr uint8_t kSparePin2 = 21;
 // the field: a head that is only positioned on the meter later must still be
 // found without a reboot.
 #define METER_LISTEN_MS 15000UL
+// How long each candidate pin is listened to while hunting for a head that was
+// plugged in somewhere other than the configured pin. The meter pushes a
+// telegram once a second, so a few seconds are plenty.
+#define METER_HUNT_MS 6000UL
 #define METER_D0_ROUNDS 3
 // The meter simulator is a test mode and switches itself off: its readings look
 // exactly like real ones, and a forgotten simulator sends an owner hunting for

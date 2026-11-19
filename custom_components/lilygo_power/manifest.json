@@ -1,7 +1,7 @@
 {
   "domain": "lilygo_power",
   "name": "LilyGo Power Meter",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "documentation": "https://github.com/uniplayer1/lora-power-meter-bridge",
   "issue_tracker": "https://github.com/uniplayer1/lora-power-meter-bridge/issues",
   "codeowners": [],

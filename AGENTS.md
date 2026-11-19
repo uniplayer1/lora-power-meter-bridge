@@ -65,5 +65,5 @@
 - `./flash.sh native` — 30 host unit tests (SML, packet codec, duty cycle, crypto).
 - `python3 tools/e2e.py` — 11 on-device checks over USB, including the meter
   simulator driving real SML telegrams through the parser.
-- `./flash.sh monitor` then `meter loopback on` with GPIO 43 jumpered to 44 —
+- `./flash.sh monitor` then `meter loopback on` with TX jumpered to RX (GPIO40→39) —
   exercises the real UART path without the meter.

@@ -480,6 +480,7 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += "\"telegrams\":" + String(ms.telegrams) + ",";
   j += "\"crc_errors\":" + String(ms.crcErrors) + ",";
   j += "\"parse_errors\":" + String(ms.parseErrors) + ",";
+  j += "\"overflow_errors\":" + String(ms.overflowErrors) + ",";
   j += "\"d0_sessions\":" + String(ms.d0Sessions) + ",";
   // Raw byte count on the meter wire: zero means nothing is driving the pin at
   // all, which is a different fault from "bytes arrive but do not decode".

@@ -23,7 +23,7 @@ flowchart LR
 
 | | Meter node (basement) | Gateway (flat) |
 |---|---|---|
-| UART | reads the meter through an IR read head on GPIO40/41 | unused |
+| UART | reads the meter through an IR read head on GPIO39/40 | unused |
 | Radio | sends a telemetry packet every 15 s (never faster than the airtime limit allows at the chosen SF) | receives, ACKs, feeds Home Assistant |
 | Network | keeps its own access point permanently — it is the on-site status display | joins the home WLAN, own AP only until provisioned, and again as fallback |
 | Display | readings, protocol, polarity, link quality | received readings, link quality, IP |
@@ -59,7 +59,7 @@ depend on it, and Home Assistant stamps readings with its own clock.
 - 1 × TTL↔IR read head ("IEC 62056-21 Lesekopf")
 - 2 × USB-C supply
 
-Pin map, read-head wiring, the GPIO43↔44 loopback test and mounting notes are in
+Pin map, read-head wiring, the loopback test and mounting notes are in
 **[docs/WIRING.md](docs/WIRING.md)**.
 
 ## Repository layout
@@ -211,7 +211,7 @@ device's JSON without running Home Assistant.
 |---|---|
 | `./flash.sh native` | 30 host tests: SML grammar (incl. a byte-exact EasyMeter Q3 telegram), packet codec round-trip, duty-cycle accounting, airtime, AES/HMAC |
 | `python3 tools/e2e.py` | 11 on-device checks over USB: shell answers, version, identity from the MAC, legal power limit, 36 s budget, self test, simulator producing parsed values |
-| `./flash.sh monitor` + `meter loopback on` | the real UART path with GPIO 43 jumpered to 44: synthesised SML out of TX, back in on RX, parsed |
+| `./flash.sh monitor` + `meter loopback on` | the real UART path with TX jumpered to RX (GPIO40→GPIO39 by default): synthesised SML out of TX, back in on RX, parsed |
 | `python3 tools/ir_head_test.py` | the IR read head alone, through a USB-TTL adapter |
 | `python3 tools/ha_payload_test.py` | the HA entity table against a device's live JSON |
 | `python3 tools/ttl_loopback_test.py` | the UART wiring without the firmware |

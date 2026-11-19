@@ -22,10 +22,10 @@ void printHelp() {
   Serial.println(F("  duty                airtime budget for the rolling hour"));
   Serial.println(F("  meter dump          raw last telegram + parser view"));
   Serial.println(F("  meter sim on|off    synthesise telegrams"));
-  Serial.println(F("  meter loopback on|off   drive telegrams out of TX (jumper 43-44)"));
+  Serial.println(F("  meter loopback on|off   drive telegrams out of TX (jumper TX to RX)"));
   Serial.println(F("  meter protocol auto|sml|d0"));
   Serial.println(F("  meter polarity auto|normal|inverted"));
-  Serial.println(F("  meter pins <rx> <tx>   move the read-head UART (e.g. 40 41)"));
+  Serial.println(F("  meter pins <rx> <tx>   move the read-head UART (e.g. 39 40)"));
   Serial.println(F("  meter scope [ms]    measure the RX line itself (idle high/low/activity)"));
   Serial.println(F("  provision meter|gateway [name]   set the role and restart"));
   Serial.println(F("  log                 the on-device event log (incl. login attempts)"));

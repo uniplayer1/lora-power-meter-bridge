@@ -1,5 +1,7 @@
 #pragma once
-// Meter acquisition: IR read head on UART1 (GPIO44 RX / GPIO43 TX).
+// Meter acquisition: IR read head on UART1 (RX/TX from METER_UART_RX_PIN and
+// METER_UART_TX_PIN, movable at runtime and found automatically if wired
+// differently - see MeterReader::runDetection()).
 //
 // The meter in the field is a German one with an optical interface, and which
 // of the two protocols it speaks is unknown - modern meters push SML
@@ -9,8 +11,8 @@
 //
 // Two test modes make the whole path testable without the meter:
 //   sim       - synthesised SML telegrams fed straight into the framer
-//   loopback  - the same telegrams written to TX, with GPIO43 jumpered to
-//               GPIO44, so the real UART, polarity handling and framing run
+//   loopback  - the same telegrams written to TX, with TX jumpered to RX, so
+//               the real UART, polarity handling and framing run
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
@@ -22,6 +24,9 @@ struct MeterStats {
   uint32_t telegrams = 0;
   uint32_t crcErrors = 0;
   uint32_t parseErrors = 0;
+  // Telegrams that did not fit the framer buffer. Zero on a healthy install;
+  // non-zero means the meter sends longer telegrams than the buffer allows.
+  uint32_t overflowErrors = 0;
   uint32_t lastTelegramAtMs = 0;
   uint32_t bytesSeen = 0;
   uint32_t d0Sessions = 0;
@@ -88,6 +93,10 @@ class MeterReader {
   void openPort(uint32_t baud, uint32_t serialConfig);
   void restorePort();
 
+  // Walks kHuntPins one step and listens there. Returns false once every
+  // candidate has been tried. Only runs while no telegram has ever been parsed.
+  bool huntNextPin(uint32_t nowMs);
+
   HardwareSerial serial_{METER_UART_NUM};
   uint8_t rxPin_ = METER_UART_RX_PIN;
   uint8_t txPin_ = METER_UART_TX_PIN;
@@ -106,6 +115,8 @@ class MeterReader {
   uint32_t lastD0AtMs_ = 0;
   bool polarityFlipped_ = false;
   bool portOpen_ = false;
+  bool hunting_ = false;
+  uint8_t huntIndex_ = 0;
 
   // D0 (IEC 62056-21 mode C) session state
   uint32_t d0StartedAtMs_ = 0;

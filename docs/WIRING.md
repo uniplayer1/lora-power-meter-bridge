@@ -10,11 +10,19 @@ sending. It needs three wires (four if the meter is an older D0 type).
 |---|---|---|
 | VCC | **3V3** | Most heads run fine on 3.3 V. If yours needs 5 V, use the `5V` pin next to it. |
 | GND | **GND** | |
-| Data out (head TX) | **IO40** | the node's receive line |
-| Data in (head RX) | **IO41** | only used for the active D0 wake-up. Leave unconnected if your meter pushes SML by itself. |
+| Data out (head TX) | **IO39** | the node's receive line |
+| Data in (head RX) | **IO40** | only used for the active D0 wake-up. Leave unconnected if your meter pushes SML by itself. |
 
-IO40/IO41 are on the 2×13 expansion header, labelled `IO40` and `IO41`. They are
-the ESP32-S3's JTAG pads, which the chip only uses when an external probe is
+That is the default the firmware ships with and what a factory reset falls back
+to. **If your head is wired elsewhere, nothing is lost:** the reader listens to
+the configured pin in both polarities for 15 s, and when no telegram ever
+arrives it walks the other free pins (39, 40, 38, 42, 41, 43, 44, 15, 16, 21, 10),
+listening a few seconds on each. The first pin that completes a telegram is
+adopted and stored, and the event log says so. The manual way is *Zähler* →
+*Daten-Pins* in the web UI, or `meter pins <rx> <tx>` over USB.
+
+IO39, IO40, IO41 and IO42 are on the 2×13 expansion header. They are the
+ESP32-S3's JTAG pads, which the chip only uses when an external probe is
 attached — the built-in USB-Serial/JTAG (flashing and the console) runs on
 GPIO19/20, so they are free for this. They are also *not* strapping pins, unlike
 45 and 46, so nothing they do at reset can upset the boot.
@@ -28,20 +36,23 @@ The pins can be moved at any time — web UI (*Zähler* → *Daten-Pins*) or
 not carry a UART: 0/3/45/46 (strapping — 45 selects the flash rail, and 46 would
 block the ROM bootloader, since a UART line idles HIGH), 19/20 USB, 26–37
 flash/PSRAM/LoRa/LED, 17/18 OLED, 2/11/13/14 SD, 1 battery divider. Other free
-pins: 15, 16, 38, 42 on the header, 43/44 and 10/21 on the QWIIC connectors.
+pins: 15, 16, 38, 39, 40, 41, 42 on the header, 43/44 and 10/21 on the QWIIC
+connectors.
 
 Power the node from a USB-C supply. Do not power the read head from the meter.
 
 ## Test without the meter: loopback
 
-Put a jumper wire between **GPIO 43 and GPIO 44**, then either
+Put a jumper wire between **the TX pin and the RX pin** (GPIO 40 → GPIO 39 with
+the default pin map, or GPIO 43 → GPIO 44 if you moved the UART to the QWIIC
+connector), then either
 
 ```
 ./flash.sh monitor        # then type: meter loopback on
 ```
 
 or use the web UI (*Zähler* tab → *Loopback an*). The firmware writes synthesised
-SML telegrams out of GPIO 43, they come back in on GPIO 44, and the parser has to
+SML telegrams out of the TX pin, they come back in on the RX pin, and the parser has to
 decode them from the real electrical signal. If values appear, the UART path,
 the polarity handling and the parser are all confirmed — everything except the
 meter itself.
@@ -63,7 +74,7 @@ polarity: set *Lesekopf-Polarität* to the other value in the web UI.
 ## If the meter is an older D0 / IEC 62056-21 type
 
 Set the protocol explicitly (web UI → *Zähler* → *Protokoll* → `D0`). The
-firmware then sends the 300-baud wake-up sequence from GPIO 43 and switches to
+firmware then sends the 300-baud wake-up sequence from the TX pin and switches to
 9600 baud for the readout. That is why the fourth wire matters here.
 
 ## Antennas
