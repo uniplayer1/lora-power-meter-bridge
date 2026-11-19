@@ -132,7 +132,6 @@ class ConfigStore {
   bool linkSecret(uint8_t out[core::kLinkSecretSize]) const;
   bool setLinkSecret(const uint8_t secret[core::kLinkSecretSize]);
   void clearLinkSecret();   // back to a plaintext link
-  bool ensureLinkSecret();  // generate one if there is none yet
 
  private:
   void applyDefaults();

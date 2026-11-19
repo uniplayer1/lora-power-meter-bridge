@@ -14,7 +14,9 @@
 namespace core {
 
 constexpr uint8_t kPacketMagic = 0xA5;
-constexpr uint8_t kProtocolVersion = 2;
+// 3: pairing carries X25519 public keys and the confirmation is sealed.
+// Boards on different versions ignore each other's frames entirely.
+constexpr uint8_t kProtocolVersion = 3;
 constexpr size_t kMaxPayload = 32;
 constexpr size_t kHeaderSize = 17;  // magic .. payloadLen
 constexpr size_t kCrcSize = 2;

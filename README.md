@@ -35,11 +35,14 @@ an active IEC 62056-21 mode-C wake-up. Protocol and polarity can both be pinned
 in the web UI for meters that detection gets wrong.
 
 Readings are sealed with AES-128-CTR and an HMAC-SHA256 tag (6 bytes) under a key
-derived from an 8-byte link secret and the network id. The secret is generated on
-the meter node, shown on its access point, and typed into the gateway once. The
-meter node creates its secret on first start and always seals, so the gateway
-needs the same secret before the two can read each other. Only pairing frames
-travel in the clear.
+derived from a 16-byte link secret and the network id. The secret is agreed
+during pairing with an X25519 key exchange: each board sends only a fresh public
+key, and both compute the same secret, which never goes over the air and is
+never typed in. The pairing confirmation is sealed with the new key, so a board
+only accepts the pairing once it knows the other side holds the same key. Both
+boards then show the same four-digit *Kontrollzahl* (web page and display),
+derived from the secret, so the owner can see that nobody sat in the middle of
+the exchange. Only the pairing request and answer travel in the clear.
 
 ## Hardware
 
@@ -136,11 +139,11 @@ polls it and its sensors have no way to log in. Nothing that *changes* the devic
 is reachable without a session. Response shape:
 
 ```
-device  name, role, fw, mac, uptime, heap, link_secret*, can_configure
+device  name, role, fw, mac, uptime, heap, can_configure
 radio   freq_mhz, sf, cr, power_dbm, interval_ms (+ legal min/max)
 wifi    mode, state, connected, ip, ap_ssid, ap_up, setup_code*, rssi, portal
 link    radio, peer, paired, net, rssi, snr, age, encrypted, duty_pct, tx, rx,
-        acks, missed, blocked, airtime_ms, budget_ms, pair_state
+        acks, missed, blocked, airtime_ms, budget_ms, pair_state, check_code
 meter   protocol, polarity, valid, age, import_kwh, export_kwh, power_w,
         l1_w/l2_w/l3_w, telegrams, crc_errors, parse_errors, bytes, ...
 ```

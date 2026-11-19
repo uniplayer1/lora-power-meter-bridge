@@ -44,7 +44,21 @@ bool equalsHex(const uint8_t* data, size_t len, const char* hex) {
 const char* kHeaderHex = "a50204001faf141e3845d2044523010017";
 const char* kPayloadHex = "0f39471b0800000000000000008603000055001e011202";
 const char* kNonceHex = "141e384545230100d2040400";
-const char* kSecretHex = "0011223344556677";
+const char* kSecretHex = "00112233445566778899aabbccddeeff";
+// sha256("lilygopower-link-v1" || secret || net id 0xAF1F little-endian).
+const char* kDerivedHex =
+    "7118553cdd1db7ab4166b474f632d1853d1a33c26d8b3579f5d19cfeef89fbab";
+
+// X25519: RFC 7748 section 6.1 (Alice = initiator, Bob = responder). The
+// pairing secret and check code were computed with Python's hmac/hashlib over
+// the shared value from the `cryptography` package.
+const char* kAlicePrivHex = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
+const char* kAlicePubHex = "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a";
+const char* kBobPrivHex = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
+const char* kBobPubHex = "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f";
+const char* kSharedHex = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
+const char* kPairSecretHex = "739f0fceab8947130123401ae2de26fd";
+const uint16_t kCheckCode = 5642;
 const char* kMasterHex =
     "2930e7fd5435d292992a979112d51f48227011b94e46cb80b2ec28c6bbcd0be1";
 const char* kSealedPayloadHex = "6e0a39ec214e6f00e1668ff34d50a0121fa2d8a6489438";
@@ -108,7 +122,7 @@ TEST_CASE("the link key both ends derive from the same secret") {
   fromHex(kSecretHex, secret, sizeof(secret));
 
   deriveLinkKey(secret, 0xAF1F, key);
-  TEST_ASSERT_TRUE(equalsHex(key, kLinkKeySize, kMasterHex));
+  TEST_ASSERT_TRUE(equalsHex(key, kLinkKeySize, kDerivedHex));
 
   // A different net id is a different key: two installations sharing a secret by
   // accident must not share a keystream.
@@ -179,4 +193,52 @@ TEST_CASE("a frame that was touched is refused") {
   // A refused frame leaves the payload alone, so nothing downstream can read
   // half-decrypted numbers.
   TEST_ASSERT_TRUE(equalsHex(payload, sizeof(payload), kSealedPayloadHex));
+}
+
+TEST_CASE("x25519 matches RFC 7748") {
+  uint8_t scalar[kX25519Size];
+  uint8_t point[kX25519Size];
+  uint8_t out[kX25519Size];
+  // Section 5.2, first vector: an arbitrary point, not the base point.
+  fromHex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4", scalar, sizeof(scalar));
+  fromHex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c", point, sizeof(point));
+  x25519(out, scalar, point);
+  TEST_ASSERT_TRUE(equalsHex(out, sizeof(out), "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"));
+
+  // Section 6.1: both public keys and the shared value.
+  uint8_t alice[kX25519Size], bob[kX25519Size], alicePub[kX25519Size], bobPub[kX25519Size];
+  fromHex(kAlicePrivHex, alice, sizeof(alice));
+  fromHex(kBobPrivHex, bob, sizeof(bob));
+  x25519Public(alicePub, alice);
+  x25519Public(bobPub, bob);
+  TEST_ASSERT_TRUE(equalsHex(alicePub, sizeof(alicePub), kAlicePubHex));
+  TEST_ASSERT_TRUE(equalsHex(bobPub, sizeof(bobPub), kBobPubHex));
+
+  uint8_t sharedA[kX25519Size], sharedB[kX25519Size];
+  x25519(sharedA, alice, bobPub);
+  x25519(sharedB, bob, alicePub);
+  TEST_ASSERT_TRUE(equalsHex(sharedA, sizeof(sharedA), kSharedHex));
+  TEST_ASSERT_EQUAL_MEMORY(sharedA, sharedB, kX25519Size);
+}
+
+TEST_CASE("both ends of a pairing derive the same link secret") {
+  uint8_t shared[kX25519Size], alicePub[kX25519Size], bobPub[kX25519Size];
+  fromHex(kSharedHex, shared, sizeof(shared));
+  fromHex(kAlicePubHex, alicePub, sizeof(alicePub));
+  fromHex(kBobPubHex, bobPub, sizeof(bobPub));
+
+  uint8_t secret[kLinkSecretSize];
+  TEST_ASSERT_TRUE(derivePairingSecret(shared, alicePub, bobPub, secret));
+  TEST_ASSERT_TRUE(equalsHex(secret, sizeof(secret), kPairSecretHex));
+  TEST_ASSERT_EQUAL_UINT16(kCheckCode, pairingCheckCode(secret));
+
+  // The order of the public keys is part of the secret: swapped roles would
+  // give a different one, so each side must know which role it played.
+  uint8_t swapped[kLinkSecretSize];
+  TEST_ASSERT_TRUE(derivePairingSecret(shared, bobPub, alicePub, swapped));
+  TEST_ASSERT_FALSE(memcmp(secret, swapped, kLinkSecretSize) == 0);
+
+  // A degenerate public key yields an all-zero shared value, which is refused.
+  uint8_t zero[kX25519Size] = {0};
+  TEST_ASSERT_FALSE(derivePairingSecret(zero, alicePub, bobPub, secret));
 }

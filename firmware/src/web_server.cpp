@@ -62,6 +62,12 @@ String jsonOrNull(bool present, double value, int decimals) {
   return String(buf);
 }
 
+String zeroPad4(uint16_t v) {
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%04u", static_cast<unsigned>(v));
+  return String(buf);
+}
+
 }  // namespace
 
 void WebUi::begin(RadioLink* link, MeterReader* meter) {
@@ -345,21 +351,6 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   // password itself is never sent anywhere.
   j += ",\"web_password_custom\":" +
        String(strcmp(cfg.webPassword, cfg.apPassword) == 0 ? "false" : "true");
-  // Like the setup code, the link secret is only handed out over the device's own
-  // access point: there the owner has already typed the WLAN password, and that
-  // is where the value is read out to give to the other device.
-  String secretHex;
-  if (apClient) {
-    uint8_t secret[core::kLinkSecretSize];
-    if (configStore.linkSecret(secret)) {
-      char buf[2 * core::kLinkSecretSize + 1];
-      for (size_t i = 0; i < core::kLinkSecretSize; ++i) {
-        snprintf(buf + 2 * i, 3, "%02X", secret[i]);
-      }
-      secretHex = buf;
-    }
-  }
-  j += ",\"link_secret\":\"" + secretHex + "\"";
   j += ",\"can_configure\":" + String(canConfigure ? "true" : "false");
   j += "},";
 
@@ -432,6 +423,9 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   // peer" are different faults and look identical without them.
   j += "\"encrypted\":" + String(link->encryptionEnabled() ? "true" : "false") + ",";
   j += "\"secret_set\":" + String(configStore.linkSecretSet() ? "true" : "false") + ",";
+  // Four digits from the agreed key, equal on both devices when the pairing
+  // worked. The key itself never leaves the device.
+  j += "\"check_code\":\"" + (ls.checkCodeValid ? zeroPad4(ls.checkCode) : String("")) + "\",";
   j += "\"auth_failures\":" + String(ls.rxAuthFailures) + ",";
   j += "\"plaintext_dropped\":" + String(ls.rxPlaintextDropped) + ",";
   j += "\"tx\":" + String(ls.txPackets) + ",\"rx\":" + String(ls.rxPackets) + ",";
@@ -698,31 +692,6 @@ bool WebUi::applySaveField(const String& key, const String& value) {
   } else if (key == "apname") {
     if (value.length() == 0) return true;
     return configStore.setApSsid(value);
-  } else if (key == "linkSecret") {
-    // Typed in once on the gateway: the value the sensor node shows on its own
-    // display. "off" clears it and the readings travel in the clear again.
-    if (value == "off" || value.length() == 0) {
-      configStore.clearLinkSecret();
-      if (link_) link_->updateLinkKey();
-    } else if (value.length() != 2 * core::kLinkSecretSize) {
-      return false;
-    } else {
-      uint8_t secret[core::kLinkSecretSize];
-      for (size_t i = 0; i < core::kLinkSecretSize; ++i) {
-        auto nibble = [](char c) -> int {
-          if (c >= '0' && c <= '9') return c - '0';
-          if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-          if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-          return -1;
-        };
-        const int high = nibble(value[2 * i]);
-        const int low = nibble(value[2 * i + 1]);
-        if (high < 0 || low < 0) return false;
-        secret[i] = static_cast<uint8_t>((high << 4) | low);
-      }
-      if (!configStore.setLinkSecret(secret)) return false;
-      if (link_) link_->updateLinkKey();
-    }
   } else if (key == "mqttHost") {
     if (value.length() > 0) {
       strncpy(cfg.mqttHost, value.c_str(), sizeof(cfg.mqttHost) - 1);

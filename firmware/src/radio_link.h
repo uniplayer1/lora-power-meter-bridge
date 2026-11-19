@@ -57,6 +57,10 @@ struct LinkStats {
   uint32_t pairingStartedMs = 0;
   uint32_t pairingFinishedMs = 0;
   char pairingResult[40] = {0};
+  // Four digits derived from the link secret. Shown on both devices: equal
+  // numbers mean both hold the same key.
+  uint16_t checkCode = 0;
+  bool checkCodeValid = false;
 };
 
 class RadioLink {
@@ -106,8 +110,10 @@ class RadioLink {
   const char* pairStateName() const;
   uint32_t pairingTimeoutMs() const { return PAIRING_TIMEOUT_MS; }
 
-  // True when a link secret is configured and a key was derived from it: every
-  // reading then travels sealed, and an unsealed one is refused.
+  // True when a link secret exists and a key was derived from it: every frame
+  // except the pairing requests and answers then travels sealed, and an unsealed
+  // reading is refused. The secret is agreed during pairing (X25519), so a
+  // paired link is always encrypted.
   bool encryptionEnabled() const { return linkEncrypted_; }
   // Re-derives the key. Called when the secret or the net id changes, both of
   // which are inputs to it.
@@ -118,6 +124,10 @@ class RadioLink {
   void markPaired(uint16_t peerId, uint32_t nowMs);
   void endPairing(PairState state, uint32_t nowMs);
   void checkReceiver(uint32_t nowMs);
+  // A fresh X25519 key pair for one pairing exchange.
+  void newPairKeys();
+  void forgetPairKeys();
+  void refreshCheckCode();
   static void IRAM_ATTR rxIsr();
   void handlePacket(const core::Packet& packet, uint32_t nowMs);
   void refreshPeer(uint32_t nowMs);
@@ -152,6 +162,17 @@ class RadioLink {
   bool initiating_ = false;
   uint16_t pendingConfirmFrom_ = 0;
   uint16_t previousPeer_ = 0;
+  // Key exchange state. pairPriv_/pairPub_: this side's key pair for the
+  // current exchange. initiatorPub_: the requester's public key this side last
+  // answered, so retries of the same request get the same answer. The
+  // responder holds the derived secret as pending until the confirmation,
+  // sealed with it, proves the requester derived the same one.
+  uint8_t pairPriv_[core::kX25519Size] = {0};
+  uint8_t pairPub_[core::kX25519Size] = {0};
+  uint8_t initiatorPub_[core::kX25519Size] = {0};
+  uint8_t pendingSecret_[core::kLinkSecretSize] = {0};
+  uint8_t pendingKey_[core::kLinkKeySize] = {0};
+  bool pendingKeyValid_ = false;
   // The confirmation closes the handshake and is the one frame whose loss
   // leaves the two ends disagreeing, so it is repeated a few times.
   uint8_t confirmsLeft_ = 0;

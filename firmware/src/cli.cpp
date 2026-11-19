@@ -37,7 +37,7 @@ void printHelp() {
   Serial.println(F("  mqtt announce       publish the Home Assistant discovery now"));
   Serial.println(F("  apname <name>       rename this device's own access point"));
   Serial.println(F("  apcode <code>       change the AP password / setup code (min 8)"));
-  Serial.println(F("  link secret [hex]   show or set the link secret (16 hex chars)"));
+  Serial.println(F("  link secret [hex]   show or set the link secret (32 hex chars, normally agreed by pairing)"));
   Serial.println(F("  radio tx            send one status packet"));
   Serial.println(F("  radio pair          start pairing"));
   Serial.println(F("  selftest            on-device self check"));
@@ -303,7 +303,7 @@ void handleCommand(const String& line, RadioLink& link, MeterReader& meter) {
     if (argument.length() == 0) {
       uint8_t secret[core::kLinkSecretSize];
       if (!configStore.linkSecret(secret)) {
-        Serial.println(F("no link secret - 'link secret <16 hex chars>' sets one"));
+        Serial.println(F("no link secret - pairing agrees one ('link secret <32 hex chars>' sets one by hand)"));
       } else {
         char hex[2 * core::kLinkSecretSize + 1];
         for (size_t i = 0; i < core::kLinkSecretSize; ++i) {

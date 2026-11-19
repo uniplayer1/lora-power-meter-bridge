@@ -154,8 +154,10 @@ bool ConfigStore::begin() {
     snprintf(cfg_.apPassword, sizeof(cfg_.apPassword), "%s", storedCode.c_str());
   }
 
-  // The link secret is under its own key for the same reason: it is eight bytes
-  // today and may grow, and the settings blob must not change size because of it.
+  // The link secret is under its own key for the same reason: it is agreed during
+  // pairing and its size may change, and the settings blob must not change size
+  // because of it. A secret of another size (the 8-byte typed-in key of 0.1.0)
+  // is ignored, so those boards simply pair again.
   if (prefs_.getBytesLength("lsecret") == sizeof(linkSecret_)) {
     prefs_.getBytes("lsecret", linkSecret_, sizeof(linkSecret_));
   }
@@ -381,21 +383,6 @@ bool ConfigStore::setLinkSecret(const uint8_t secret[core::kLinkSecretSize]) {
 void ConfigStore::clearLinkSecret() {
   memset(linkSecret_, 0, sizeof(linkSecret_));
   storeLinkSecret();
-}
-
-bool ConfigStore::ensureLinkSecret() {
-  if (linkSecretSet()) return true;
-
-  uint8_t secret[core::kLinkSecretSize];
-  const uint32_t first = esp_random();
-  const uint32_t second = esp_random();
-  memcpy(secret, &first, 4);
-  memcpy(secret + 4, &second, 4);
-  if (setLinkSecret(secret)) return true;
-
-  // Two zero draws in a row is not a reason to run without a key.
-  secret[0] = 0x01;
-  return setLinkSecret(secret);
 }
 
 bool ConfigStore::save() {

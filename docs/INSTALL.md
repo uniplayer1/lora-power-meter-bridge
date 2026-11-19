@@ -49,16 +49,14 @@ The basement board does **not** need your home WiFi.
    address. The board's own WiFi switches off about two minutes later. If it
    cannot join (wrong password, 5 GHz-only network), the page says so and lets
    you correct it.
-4. Enter the key: the basement board's display (page *Zugang*) and its page
-   (*Funk* → *Verschlüsselung*) show a 16-character key. Type it into the
-   gateway's page under *Funk* → *Verschlüsselung*. The basement board always
-   encrypts, so without the key the two boards cannot read each other even when
-   paired. The *Funk* tab tells you when that is the problem.
-5. Pair the two boards: on **one** board's page → *Funk* → **Koppeln**, with both
+4. Pair the two boards: on **one** board's page → *Funk* → **Koppeln**, with both
    boards in range (set them up next to each other the first time). The other
    board answers by itself; both show *verbunden* within a few seconds.
    Pressing it on both boards also works. **Neu koppeln** on a paired board
    keeps the old pairing if no other board answers within a minute.
+5. Nothing to type for encryption: pairing agrees a new key by itself. Both
+   boards show the same four-digit *Kontrollzahl* (page *Funk* → *Verschlüsselung*,
+   and on the display's *Funkstrecke* page). If the two numbers differ, pair again.
 
 ## 5. Home Assistant
 

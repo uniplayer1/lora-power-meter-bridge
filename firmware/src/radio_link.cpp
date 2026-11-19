@@ -35,6 +35,7 @@ bool RadioLink::begin(const DeviceConfig& config) {
   seq_ = static_cast<uint16_t>(esp_random() & 0xFFFFu);
 
   updateLinkKey();
+  refreshCheckCode();
 
   // The SX1262 is wired to the board's own SPI pins; RadioLib does not bring
   // the bus up by itself, so without this the radio init fails silently.
@@ -148,11 +149,12 @@ bool RadioLink::send(core::PacketType type, const uint8_t* payload, uint8_t payl
     return false;
   }
 
-  // The pairing handshake itself stays in the clear: it is how the two ends find
-  // each other, and it carries no readings. Everything else is sealed once a key
-  // exists, with the tag in place of the CRC.
+  // The request and the answer of a pairing stay in the clear: they carry the
+  // public keys the secret is computed from. Everything else is sealed once a
+  // key exists, with the tag in place of the CRC - the confirmation included,
+  // which is how the answering side learns that both computed the same key.
   const bool sealThis = linkEncrypted_ && payloadLen > 0 && type != core::PacketType::PairRequest &&
-                        type != core::PacketType::PairAck && type != core::PacketType::PairConfirm;
+                        type != core::PacketType::PairAck;
 
   uint8_t wire[core::kHeaderSize + core::kMaxPayload + core::kLinkTagSize];
   const size_t len = core::encodePacket(packet, wire, sizeof(wire), sealThis ? linkKey_ : nullptr);
@@ -195,6 +197,30 @@ bool RadioLink::sendTelemetry(const core::MeterTelemetry& telemetry, uint32_t no
   return true;
 }
 
+void RadioLink::newPairKeys() {
+  for (size_t i = 0; i < core::kX25519Size; i += 4) {
+    const uint32_t r = esp_random();
+    memcpy(pairPriv_ + i, &r, 4);
+  }
+  core::x25519Public(pairPub_, pairPriv_);
+}
+
+void RadioLink::forgetPairKeys() {
+  memset(pairPriv_, 0, sizeof(pairPriv_));
+  memset(pairPub_, 0, sizeof(pairPub_));
+  memset(initiatorPub_, 0, sizeof(initiatorPub_));
+  memset(pendingSecret_, 0, sizeof(pendingSecret_));
+  memset(pendingKey_, 0, sizeof(pendingKey_));
+  pendingKeyValid_ = false;
+}
+
+void RadioLink::refreshCheckCode() {
+  uint8_t secret[core::kLinkSecretSize];
+  stats_.checkCodeValid = configStore.linkSecret(secret);
+  stats_.checkCode = stats_.checkCodeValid ? core::pairingCheckCode(secret) : 0;
+  memset(secret, 0, sizeof(secret));
+}
+
 void RadioLink::startPairing(uint32_t nowMs) {
   // Re-pairing while paired: the old peer is set aside so that an answer can be
   // accepted, and put back if nobody answers. Before, a paired device ignored
@@ -204,6 +230,8 @@ void RadioLink::startPairing(uint32_t nowMs) {
   peerId_ = 0;
   initiating_ = true;
   pendingConfirmFrom_ = 0;
+  forgetPairKeys();
+  newPairKeys();
   stats_.pairingActive = true;
   stats_.pairState = PairState::Running;
   stats_.pairingStartedMs = nowMs;
@@ -216,6 +244,7 @@ void RadioLink::startPairing(uint32_t nowMs) {
 void RadioLink::endPairing(PairState state, uint32_t nowMs) {
   initiating_ = false;
   pendingConfirmFrom_ = 0;
+  forgetPairKeys();
   stats_.pairingActive = false;
   stats_.pairState = state;
   stats_.pairingFinishedMs = nowMs;
@@ -243,6 +272,12 @@ void RadioLink::clearPairing() {
   stats_.pairState = PairState::Unpaired;
   stats_.pairingActive = false;
   stats_.pairingResult[0] = '\0';
+  forgetPairKeys();
+  // The secret belongs to the pairing: without a peer there is nobody to share
+  // it with, and the next pairing agrees a new one.
+  configStore.clearLinkSecret();
+  updateLinkKey();
+  refreshCheckCode();
   configStore.mutableGet().peerShortId = 0;
   configStore.save();
   logEvent("pairing cleared");
@@ -267,6 +302,8 @@ void RadioLink::markPaired(uint16_t peerId, uint32_t nowMs) {
   // derivation: without this the two ends would derive different keys and every
   // frame would be refused.
   updateLinkKey();
+  refreshCheckCode();
+  forgetPairKeys();
   // "Online" needs a real, decodable packet from the peer, which a pairing
   // frame is not - a missing or different link secret would otherwise look
   // connected for two minutes and then drop. A heartbeat goes out shortly, so
@@ -282,7 +319,8 @@ void RadioLink::markPaired(uint16_t peerId, uint32_t nowMs) {
   stats_.pairState = PairState::Done;
   stats_.pairingActive = false;
   stats_.pairingFinishedMs = nowMs;
-  snprintf(stats_.pairingResult, sizeof(stats_.pairingResult), "Verbunden mit %04X", peerId);
+  snprintf(stats_.pairingResult, sizeof(stats_.pairingResult), "Verbunden mit %04X, Code %04u", peerId,
+           static_cast<unsigned>(stats_.checkCode));
   if (!samePeer) {
     configStore.mutableGet().peerShortId = peerId;
     configStore.mutableGet().netId = netId_;
@@ -353,9 +391,7 @@ void RadioLink::loop(uint32_t nowMs) {
     } else if (initiating_ && olderThan(nowMs, lastPairTxMs_, PAIRING_RETRY_MS)) {
       lastPairTxMs_ = nowMs;
       ++stats_.pairingAttempts;
-      uint8_t payload[4];
-      core::putLe(payload, pairKey_, 4);
-      if (!send(core::PacketType::PairRequest, payload, sizeof(payload), 0, false)) {
+      if (!send(core::PacketType::PairRequest, pairPub_, sizeof(pairPub_), 0, false)) {
         // Duty cycle or the radio refused it; say so instead of looking idle.
         logEvent("pairing: send refused (Zeitbudget oder Funkfehler)");
       }
@@ -410,8 +446,15 @@ void RadioLink::onReceive() {
     return;
   }
 
+  // A pairing confirmation is sealed with the key that pairing just agreed,
+  // which this side holds as pending until that very frame proves it.
+  const uint8_t* key = linkEncrypted_ ? linkKey_ : nullptr;
+  if (pendingKeyValid_ && available > 2 &&
+      buffer[2] == static_cast<uint8_t>(core::PacketType::PairConfirm)) {
+    key = pendingKey_;
+  }
   core::Packet packet;
-  if (!core::decodePacket(buffer, available, packet, linkEncrypted_ ? linkKey_ : nullptr)) {
+  if (!core::decodePacket(buffer, available, packet, key)) {
     // Distinguish "the air was noisy" from "this frame was not written by our
     // peer": a sealed frame that fails its tag is the second kind.
     if ((buffer[3] & core::kFlagEncrypted) != 0) {
@@ -483,7 +526,7 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
       break;
 
     case core::PacketType::PairRequest: {
-      if (packet.payloadLen < 4) break;
+      if (packet.payloadLen < core::kX25519Size) break;
       // Answered when this side is free, or when the request comes from the
       // device it is already paired with (that one is re-pairing). A neighbour's
       // broadcast cannot take over an established link.
@@ -497,10 +540,30 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
         initiating_ = false;
         logEvent("pairing: %04X is pairing too - answering it", packet.src);
       }
-      uint8_t reply[8];
-      core::putLe(reply, pairKey_, 4);
-      core::putLe(reply + 4, netId_, 4);
-      send(core::PacketType::PairAck, reply, sizeof(reply), packet.src, false);
+      // One key pair per request: the requester repeats its request every few
+      // seconds with the same public key, and every answer to it must lead to
+      // the same secret, whichever answer it ends up hearing.
+      const bool sameRequest = pendingKeyValid_ && packet.src == pendingConfirmFrom_ &&
+                               memcmp(initiatorPub_, packet.payload, core::kX25519Size) == 0;
+      if (!sameRequest) {
+        forgetPairKeys();
+        memcpy(initiatorPub_, packet.payload, core::kX25519Size);
+        newPairKeys();
+        uint8_t shared[core::kX25519Size];
+        core::x25519(shared, pairPriv_, initiatorPub_);
+        const bool ok = core::derivePairingSecret(shared, initiatorPub_, pairPub_, pendingSecret_);
+        memset(shared, 0, sizeof(shared));
+        if (!ok) {
+          forgetPairKeys();
+          logEvent("pairing: unusable key from %04X", packet.src);
+          break;
+        }
+        // The requester adopts this side's net id from the answer's header, so
+        // the key is derived for it.
+        core::deriveLinkKey(pendingSecret_, netId_, pendingKey_);
+        pendingKeyValid_ = true;
+      }
+      send(core::PacketType::PairAck, pairPub_, sizeof(pairPub_), packet.src, false);
       pendingConfirmFrom_ = packet.src;
       break;
     }
@@ -508,15 +571,24 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
     case core::PacketType::PairAck: {
       // Only the side that asked takes an answer. Before, any unpaired device
       // adopted the net id from any answer it overheard.
-      if (!initiating_ || packet.payloadLen < 8 || packet.dst != srcId_) break;
-      const uint32_t nodeKey = static_cast<uint32_t>(core::getLe(packet.payload, 4));
-      const uint32_t nodeNet = static_cast<uint32_t>(core::getLe(packet.payload + 4, 4));
-      netId_ = static_cast<uint16_t>(nodeNet & 0xFFFF);
-      pairKey_ = nodeKey;
+      if (!initiating_ || packet.payloadLen < core::kX25519Size || packet.dst != srcId_) break;
+      uint8_t shared[core::kX25519Size];
+      uint8_t secret[core::kLinkSecretSize];
+      core::x25519(shared, pairPriv_, packet.payload);
+      const bool ok = core::derivePairingSecret(shared, pairPub_, packet.payload, secret);
+      memset(shared, 0, sizeof(shared));
+      if (!ok || packet.netId == 0) {
+        logEvent("pairing: unusable answer from %04X", packet.src);
+        break;
+      }
+      netId_ = packet.netId;
+      configStore.setLinkSecret(secret);
+      memset(secret, 0, sizeof(secret));
       markPaired(packet.src, nowMs);
       // Close the handshake: the answering side still has no idea who we are,
-      // and would keep reporting itself as unpaired. Repeated from loop(), so a
-      // single lost frame does not leave the two ends disagreeing.
+      // and holds the secret only as pending. The confirmation is sealed with
+      // the new key, which is what makes the other side accept it. Repeated
+      // from loop(), so a single lost frame does not leave the ends disagreeing.
       confirmsLeft_ = 3;
       nextConfirmMs_ = nowMs;
       logEvent("pairing confirmed to %04X", packet.src);
@@ -525,12 +597,15 @@ void RadioLink::handlePacket(const core::Packet& packet, uint32_t nowMs) {
 
     case core::PacketType::PairConfirm: {
       if (packet.payloadLen < 4 || packet.dst != srcId_) break;
-      // Accepted from the device this side just answered, or as a repeat from
-      // the one it is already paired with. Anything else did not ask us.
-      const bool expected = pendingConfirmFrom_ != 0 && packet.src == pendingConfirmFrom_;
-      const bool repeat = peerId_ != 0 && packet.src == peerId_;
-      if (!expected && !repeat) break;
-      if (repeat && !expected && stats_.pairState == PairState::Done) break;
+      // Accepted only from the device this side answered, and only sealed with
+      // the key the exchange produced - proof that both computed the same one.
+      // The repeats that follow decode under the committed key and fall
+      // through here harmlessly.
+      const bool expected = pendingKeyValid_ && pendingConfirmFrom_ != 0 &&
+                            packet.src == pendingConfirmFrom_ &&
+                            (packet.flags & core::kFlagEncrypted) != 0;
+      if (!expected) break;
+      configStore.setLinkSecret(pendingSecret_);
       markPaired(packet.src, nowMs);
       break;
     }

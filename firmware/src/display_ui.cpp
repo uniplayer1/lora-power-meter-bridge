@@ -90,7 +90,7 @@ void DisplayUi::drawLinkPage(const char* title) {
   display_.setFont(u8g2_font_6x12_tf);
   if (link.pairState == PairState::Running) {
     display_.drawStr(0, 28, "Koppeln laeuft");
-  } else if (link.pairState == PairState::TimedOut) {
+  } else if (link.pairState == PairState::TimedOut && !link_->paired()) {
     display_.drawStr(0, 28, "Koppeln: Fehler");
   } else {
     display_.drawStr(0, 28, link.peerOnline ? "Gegenstelle: online" : "Gegenstelle: offline");
@@ -104,8 +104,15 @@ void DisplayUi::drawLinkPage(const char* title) {
            (unsigned long)(link_->budget().budgetMs() / 1000), (unsigned long)link.txPackets,
            (unsigned long)link.rxPackets);
   display_.drawStr(0, 54, line);
-  snprintf(line, sizeof(line), "net %04X  peer %04X", configStore.get().netId,
-           configStore.get().peerShortId);
+  // The check code of the pairing key: the same number on both displays means
+  // both boards agreed the same key. The key itself is never shown.
+  if (link.checkCodeValid) {
+    snprintf(line, sizeof(line), "peer %04X  Kontrollzahl %04u", configStore.get().peerShortId,
+             static_cast<unsigned>(link.checkCode));
+  } else {
+    snprintf(line, sizeof(line), "net %04X  peer %04X", configStore.get().netId,
+             configStore.get().peerShortId);
+  }
   display_.drawStr(0, 64, line);
 }
 
@@ -141,22 +148,7 @@ void DisplayUi::drawAccessPage(const char* title, bool accessPoint) {
     display_.drawStr(0, 38, configStore.setupCode());
     display_.setFont(u8g2_font_4x6_tf);
     display_.drawStr(0, 50, "auch WLAN-Passwort");
-    // The link secret sits here, where the owner stands and copies it into the
-    // other device. It replaces the address line, which is on every other page
-    // anyway - the key is the one value that exists nowhere else.
-    uint8_t secret[core::kLinkSecretSize];
-    if (configStore.linkSecret(secret)) {
-      char hex[2 * core::kLinkSecretSize + 1];
-      for (size_t i = 0; i < core::kLinkSecretSize; ++i) {
-        snprintf(hex + 2 * i, 3, "%02X", secret[i]);
-      }
-      char text[24];
-      snprintf(text, sizeof(text), "Funk-Schluessel:");
-      display_.drawStr(0, 56, text);
-      display_.drawStr(0, 62, hex);
-    } else {
-      display_.drawStr(0, 58, accessPoint ? "http://192.168.4.1" : netIp().c_str());
-    }
+    display_.drawStr(0, 58, accessPoint ? "http://192.168.4.1" : netIp().c_str());
   }
 
   // The firmware stamp on screen: "is the new build really on this board?" was

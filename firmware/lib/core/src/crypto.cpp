@@ -283,6 +283,177 @@ void aes128CtrXor(const uint8_t key[16], const uint8_t iv[16], uint8_t* data, si
   }
 }
 
+// ── X25519 ───────────────────────────────────────────────────────────────────
+// Field arithmetic modulo 2^255 - 19 with sixteen 16-bit limbs held in 64-bit
+// integers, after the public-domain TweetNaCl. Constant time: the ladder swaps
+// with masks, never with branches on secret bits. Small and portable rather than
+// fast; one scalar multiplication takes a few tens of milliseconds on the board
+// and happens twice per pairing.
+namespace {
+
+typedef int64_t Fe[16];
+
+void feCarry(Fe o) {
+  for (int i = 0; i < 16; ++i) {
+    o[i] += (static_cast<int64_t>(1) << 16);
+    const int64_t c = o[i] >> 16;
+    if (i < 15) {
+      o[i + 1] += c - 1;
+    } else {
+      o[0] += 38 * (c - 1);
+    }
+    o[i] -= c * 65536;
+  }
+}
+
+void feSwap(Fe p, Fe q, int64_t bit) {
+  const int64_t mask = ~(bit - 1);
+  for (int i = 0; i < 16; ++i) {
+    const int64_t t = mask & (p[i] ^ q[i]);
+    p[i] ^= t;
+    q[i] ^= t;
+  }
+}
+
+void fePack(uint8_t out[32], const Fe n) {
+  Fe m, t;
+  for (int i = 0; i < 16; ++i) t[i] = n[i];
+  feCarry(t);
+  feCarry(t);
+  feCarry(t);
+  for (int j = 0; j < 2; ++j) {
+    m[0] = t[0] - 0xffed;
+    for (int i = 1; i < 15; ++i) {
+      m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1);
+      m[i - 1] &= 0xffff;
+    }
+    m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
+    const int64_t borrow = (m[15] >> 16) & 1;
+    m[14] &= 0xffff;
+    feSwap(t, m, 1 - borrow);
+  }
+  for (int i = 0; i < 16; ++i) {
+    out[2 * i] = static_cast<uint8_t>(t[i] & 0xff);
+    out[2 * i + 1] = static_cast<uint8_t>((t[i] >> 8) & 0xff);
+  }
+}
+
+void feUnpack(Fe o, const uint8_t in[32]) {
+  for (int i = 0; i < 16; ++i) o[i] = in[2 * i] + (static_cast<int64_t>(in[2 * i + 1]) << 8);
+  o[15] &= 0x7fff;
+}
+
+void feAdd(Fe o, const Fe a, const Fe b) {
+  for (int i = 0; i < 16; ++i) o[i] = a[i] + b[i];
+}
+
+void feSub(Fe o, const Fe a, const Fe b) {
+  for (int i = 0; i < 16; ++i) o[i] = a[i] - b[i];
+}
+
+void feMul(Fe o, const Fe a, const Fe b) {
+  int64_t t[31] = {0};
+  for (int i = 0; i < 16; ++i) {
+    for (int j = 0; j < 16; ++j) t[i + j] += a[i] * b[j];
+  }
+  for (int i = 0; i < 15; ++i) t[i] += 38 * t[i + 16];
+  for (int i = 0; i < 16; ++i) o[i] = t[i];
+  feCarry(o);
+  feCarry(o);
+}
+
+void feSquare(Fe o, const Fe a) { feMul(o, a, a); }
+
+void feInvert(Fe o, const Fe in) {
+  // in^(p-2) by square-and-multiply over the fixed exponent 2^255 - 21.
+  Fe c;
+  for (int i = 0; i < 16; ++i) c[i] = in[i];
+  for (int a = 253; a >= 0; --a) {
+    feSquare(c, c);
+    if (a != 2 && a != 4) feMul(c, c, in);
+  }
+  for (int i = 0; i < 16; ++i) o[i] = c[i];
+}
+
+}  // namespace
+
+void x25519(uint8_t out[kX25519Size], const uint8_t scalar[kX25519Size],
+            const uint8_t point[kX25519Size]) {
+  static const Fe k121665 = {0xDB41, 1};
+  uint8_t z[32];
+  for (int i = 0; i < 31; ++i) z[i] = scalar[i];
+  z[31] = static_cast<uint8_t>((scalar[31] & 127) | 64);
+  z[0] &= 248;
+
+  Fe x, a, b, c, d, e, f;
+  feUnpack(x, point);
+  for (int i = 0; i < 16; ++i) {
+    b[i] = x[i];
+    d[i] = a[i] = c[i] = 0;
+  }
+  a[0] = d[0] = 1;
+
+  for (int i = 254; i >= 0; --i) {
+    const int64_t bit = (z[i >> 3] >> (i & 7)) & 1;
+    feSwap(a, b, bit);
+    feSwap(c, d, bit);
+    feAdd(e, a, c);
+    feSub(a, a, c);
+    feAdd(c, b, d);
+    feSub(b, b, d);
+    feSquare(d, e);
+    feSquare(f, a);
+    feMul(a, c, a);
+    feMul(c, b, e);
+    feAdd(e, a, c);
+    feSub(a, a, c);
+    feSquare(b, a);
+    feSub(c, d, f);
+    feMul(a, c, k121665);
+    feAdd(a, a, d);
+    feMul(c, c, a);
+    feMul(a, d, f);
+    feMul(d, b, x);
+    feSquare(b, e);
+    feSwap(a, b, bit);
+    feSwap(c, d, bit);
+  }
+  feInvert(c, c);
+  feMul(a, a, c);
+  fePack(out, a);
+  memset(z, 0, sizeof(z));
+}
+
+void x25519Public(uint8_t out[kX25519Size], const uint8_t privateKey[kX25519Size]) {
+  uint8_t base[kX25519Size] = {9};
+  x25519(out, privateKey, base);
+}
+
+bool derivePairingSecret(const uint8_t shared[kX25519Size], const uint8_t initiatorPub[kX25519Size],
+                         const uint8_t responderPub[kX25519Size], uint8_t out[kLinkSecretSize]) {
+  uint8_t any = 0;
+  for (size_t i = 0; i < kX25519Size; ++i) any |= shared[i];
+  if (any == 0) return false;
+  static const char kLabel[] = "lilygopower-pair-v1";
+  uint8_t msg[sizeof(kLabel) - 1 + 2 * kX25519Size];
+  memcpy(msg, kLabel, sizeof(kLabel) - 1);
+  memcpy(msg + sizeof(kLabel) - 1, initiatorPub, kX25519Size);
+  memcpy(msg + sizeof(kLabel) - 1 + kX25519Size, responderPub, kX25519Size);
+  uint8_t mac[32];
+  hmacSha256(shared, kX25519Size, msg, sizeof(msg), mac);
+  memcpy(out, mac, kLinkSecretSize);
+  memset(mac, 0, sizeof(mac));
+  return true;
+}
+
+uint16_t pairingCheckCode(const uint8_t secret[kLinkSecretSize]) {
+  static const char kLabel[] = "lilygopower-check-v1";
+  uint8_t mac[32];
+  hmacSha256(secret, kLinkSecretSize, reinterpret_cast<const uint8_t*>(kLabel), sizeof(kLabel) - 1, mac);
+  const uint32_t v = (static_cast<uint32_t>(mac[0]) << 16) | (static_cast<uint32_t>(mac[1]) << 8) | mac[2];
+  return static_cast<uint16_t>(v % 10000u);
+}
+
 void deriveLinkKey(const uint8_t secret[kLinkSecretSize], uint16_t netId,
                    uint8_t out[kLinkKeySize]) {
   static const char kSalt[] = "lilygopower-link-v1";

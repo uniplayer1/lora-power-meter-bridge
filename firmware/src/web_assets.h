@@ -515,22 +515,13 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       </div>
 
       <div class="card"><h3>Verschlüsselung</h3>
-        <div class="rows"><div class="row"><span>Status</span><span id="lk-crypt">–</span></div></div>
-        <div data-only="meter">
-          <div class="rows"><div class="row"><span>Schlüssel</span><span id="own-secret" class="mono">–</span></div></div>
-          <p class="hint">Dieser Schlüssel wird hier erzeugt und steht auch auf dem Display (Seite „Zugang“). Einmal am
-            Gateway eintragen – er geht nie über Funk.</p>
+        <div class="rows">
+          <div class="row"><span>Status</span><span id="lk-crypt">–</span></div>
+          <div class="row"><span>Kontrollzahl</span><span id="lk-check" class="mono">–</span></div>
         </div>
-        <div data-only="gateway">
-          <label for="linkSecret">Schlüssel vom Keller-Gerät (16 Zeichen)</label>
-          <input id="linkSecret" class="mono" placeholder="z. B. 3F9A 21C4 D0E8 7B15" autocapitalize="characters"
-                 spellcheck="false" autocomplete="off">
-          <p class="hint">Steht auf dem Display des Keller-Geräts (Seite „Zugang“). Leerzeichen sind egal.</p>
-          <div class="actions">
-            <button class="primary" id="saveLinkSecret">Übernehmen</button>
-            <button class="ghost" id="clearLinkSecret">Ausschalten</button>
-          </div>
-        </div>
+        <p class="hint">Beim Koppeln vereinbaren die beiden Geräte selbst einen neuen Schlüssel (X25519-Schlüsseltausch);
+          er geht nie über Funk und muss nirgends eingetippt werden. Die Kontrollzahl wird aus dem Schlüssel berechnet
+          und steht auch auf dem Display: Ist sie auf beiden Geräten gleich, haben beide denselben Schlüssel.</p>
       </div>
     </div>
   </section>
@@ -724,7 +715,7 @@ const FIELD_LABELS = {
   freq: 'Frequenz', sf: 'Spreading Factor', power: 'Sendeleistung', interval: 'Sendeintervall',
   protocol: 'Protokoll', polarity: 'Polarität', apname: 'WLAN-Name (mind. 4 Zeichen)',
   apcode: 'Zugangscode (8–15 Buchstaben/Ziffern)', newpass: 'Passwort (mind. 8 Zeichen)',
-  linkSecret: 'Schlüssel (16 Hex-Zeichen)', mqttPort: 'Port'
+  mqttPort: 'Port'
 };
 
 async function post(url, data) {
@@ -904,10 +895,10 @@ function render() {
       txt = 'Kopplung fehlgeschlagen: ' + (l.pair_result || 'keine Antwort') + '. Beide Geräte näher zusammenbringen (Antennen dran?) und erneut starten.';
     } else if (l.paired && !l.peer && l.auth_failures) {
       cls = 'warnbox';
-      txt = 'Gekoppelt, aber die Pakete der Gegenstelle lassen sich nicht prüfen – auf beiden Geräten muss derselbe Schlüssel stehen (unten unter „Verschlüsselung“).';
+      txt = 'Gekoppelt, aber die Pakete der Gegenstelle passen nicht zum Schlüssel – die beiden Geräte haben verschiedene Schlüssel. Einmal neu koppeln.';
     } else if (l.paired && !l.peer && l.plaintext_dropped) {
       cls = 'warnbox';
-      txt = 'Gekoppelt, aber die Gegenstelle sendet unverschlüsselt – auf dem Wohnungs-Gerät den Schlüssel vom Keller-Gerät eintragen.';
+      txt = 'Gekoppelt, aber die Gegenstelle sendet unverschlüsselt – vermutlich läuft dort noch eine ältere Firmware. Beide Geräte aktualisieren und neu koppeln.';
     } else if (!l.paired && l.traffic_age !== null && l.traffic_age !== undefined) {
       cls = 'warnbox';
       txt = 'Es kommen Pakete von ' + (src || '?') + ' an, aber die Geräte sind nicht gekoppelt – auf einem der beiden „Koppeln“ drücken.';
@@ -919,9 +910,8 @@ function render() {
   set('lk-timeout', 'Beide Geräte müssen in Reichweite sein; die Kopplung dauert bis zu ' + (l.pair_timeout_s || 60) +
     ' s. Die Verbindung gilt als getrennt, wenn ' + (l.peer_timeout_s || 90) + ' s lang nichts ankommt.');
 
-  set('lk-crypt', l.encrypted ? 'an – verschlüsselt und signiert'
-    : (l.secret_set ? 'Schlüssel gesetzt, Gegenstelle passt nicht' : 'aus – Klartext'));
-  set('own-secret', d.link_secret ? d.link_secret.replace(/(.{4})/g, '$1 ').trim() : 'nur über das Geräte-WLAN sichtbar – oder auf dem Display');
+  set('lk-crypt', l.encrypted ? 'an – verschlüsselt und signiert' : 'aus – entsteht beim Koppeln');
+  set('lk-check', l.check_code || '–');
 
   fill('freq', r.freq_mhz); fill('sf', r.sf); fill('power', r.power_dbm);
   if (r.interval_ms) fill('interval', Math.round(r.interval_ms / 1000));
@@ -1095,16 +1085,6 @@ function initApp() {
   bindSave('saveMeter', ['protocol', 'polarity', 'meterRx', 'meterTx']);
   bindSave('saveRadio', ['freq', 'sf', 'power', 'interval'], {
     check: (d) => (d.freq && (d.freq < 868.0625 || d.freq > 868.5375)) ? 'Frequenz muss zwischen 868,0625 und 868,5375 MHz liegen' : ''
-  });
-  bindSave('saveLinkSecret', ['linkSecret'], {
-    clear: ['linkSecret'],
-    check: (d) => { d.linkSecret = d.linkSecret.replace(/[\s-]/g, ''); return /^[0-9a-fA-F]{16}$/.test(d.linkSecret) ? '' : 'Der Schlüssel hat 16 Zeichen aus 0–9 und A–F'; }
-  });
-  const clearSecret = $('clearLinkSecret');
-  if (clearSecret) clearSecret.addEventListener('click', async () => {
-    if (!confirm('Verschlüsselung ausschalten? Die Messwerte gehen dann im Klartext über Funk.')) return;
-    await post('/api/save', { linkSecret: 'off' });
-    setTimeout(poll, 500);
   });
   bindSave('saveWifi', ['ssid', 'pass'], { check: (d) => d.ssid ? '' : 'Bitte ein Netzwerk wählen' });
   bindSave('saveAp', ['apname', 'apcode', 'keepap'], {

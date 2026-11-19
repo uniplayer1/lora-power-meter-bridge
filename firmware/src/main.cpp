@@ -153,10 +153,6 @@ void setup() {
                 digitalRead(0) == LOW ? "LOW (held or stuck - this selects the downloader!)" : "released");
 
   configStore.begin();
-  // The sensor node owns the link secret and shows it on its display; the gateway
-  // is given the same value once by the owner. Generating it here means it exists
-  // the first time anyone looks, rather than appearing after the first save.
-  if (configStore.roleIs(DeviceRole::Meter)) configStore.ensureLinkSecret();
   logIdentity();
 
   displayUi.begin();
