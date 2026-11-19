@@ -27,38 +27,38 @@ struct Entity {
 };
 
 const Entity kEntities[] = {
-    {"sensor", "import", "Stromzaehler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
+    {"sensor", "import", "Stromzähler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
      "total_increasing"},
-    {"sensor", "export", "Stromzaehler Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh",
+    {"sensor", "export", "Stromzähler Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh",
      "energy", "total_increasing"},
-    {"sensor", "power", "Stromzaehler Leistung", "{{ value_json.meter.power_w }}", "W", "power",
+    {"sensor", "power", "Stromzähler Leistung", "{{ value_json.meter.power_w }}", "W", "power",
      "measurement"},
-    {"sensor", "power_l1", "Stromzaehler Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power",
+    {"sensor", "power_l1", "Stromzähler Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power",
      "measurement"},
-    {"sensor", "power_l2", "Stromzaehler Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power",
+    {"sensor", "power_l2", "Stromzähler Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power",
      "measurement"},
-    {"sensor", "power_l3", "Stromzaehler Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power",
+    {"sensor", "power_l3", "Stromzähler Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power",
      "measurement"},
-    {"sensor", "meter_age", "Stromzaehler Alter der Messung", "{{ value_json.meter.age }}", "s",
+    {"sensor", "meter_age", "Stromzähler Alter der Messung", "{{ value_json.meter.age }}", "s",
      "duration", "measurement"},
-    {"sensor", "telegrams", "Stromzaehler Telegramme", "{{ value_json.meter.telegrams }}", "", "",
+    {"sensor", "telegrams", "Stromzähler Telegramme", "{{ value_json.meter.telegrams }}", "", "",
      "total_increasing"},
-    {"sensor", "crc_errors", "Stromzaehler Pruefsummenfehler", "{{ value_json.meter.crc_errors }}",
+    {"sensor", "crc_errors", "Stromzähler Prüfsummenfehler", "{{ value_json.meter.crc_errors }}",
      "", "", "total_increasing"},
-    {"sensor", "rssi", "Stromzaehler Link RSSI", "{{ value_json.link.rssi }}", "dBm",
+    {"sensor", "rssi", "Stromzähler Link RSSI", "{{ value_json.link.rssi }}", "dBm",
      "signal_strength", "measurement"},
-    {"sensor", "snr", "Stromzaehler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement"},
-    {"sensor", "link_age", "Stromzaehler Link Alter", "{{ value_json.link.age }}", "s", "duration",
+    {"sensor", "snr", "Stromzähler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement"},
+    {"sensor", "link_age", "Stromzähler Link Alter", "{{ value_json.link.age }}", "s", "duration",
      "measurement"},
-    {"sensor", "duty", "Stromzaehler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "",
+    {"sensor", "duty", "Stromzähler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "",
      "measurement"},
-    {"sensor", "uptime", "Stromzaehler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
+    {"sensor", "uptime", "Stromzähler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
      "total_increasing"},
-    {"sensor", "heap", "Stromzaehler freier Speicher", "{{ value_json.device.heap }}", "B", "",
+    {"sensor", "heap", "Stromzähler freier Speicher", "{{ value_json.device.heap }}", "B", "",
      "measurement"},
-    {"binary_sensor", "peer", "Stromzaehler Keller-Link", "{{ value_json.link.peer }}", "", "connectivity",
+    {"binary_sensor", "peer", "Stromzähler Keller-Link", "{{ value_json.link.peer }}", "", "connectivity",
      ""},
-    {"binary_sensor", "meter_valid", "Stromzaehler Messung gueltig", "{{ value_json.meter.valid }}",
+    {"binary_sensor", "meter_valid", "Stromzähler Messung gültig", "{{ value_json.meter.valid }}",
      "", "connectivity", ""},
 };
 
@@ -73,9 +73,12 @@ String topicFor(const DeviceConfig& cfg, const String& component, const String& 
 }
 
 String discoveryPayload(const DeviceConfig& cfg, const Entity& entity) {
+  // A device name is owner-supplied and may contain quotes or umlauts; it used to
+  // be pasted into the payload raw, which is enough to make Home Assistant drop
+  // the whole config.
   const String base = cfg.mqttBase;
   String payload = "{\"name\":\"";
-  payload += entity.name;
+  payload += escapeJson(String(entity.name));
   payload += "\",\"uniq_id\":\"" + nodeId() + "_" + entity.object + "\"";
   payload += ",\"stat_t\":\"" + base + "/state\"";
   payload += ",\"avty_t\":\"" + base + "/status\"";
@@ -161,6 +164,13 @@ bool HaMqtt::announce(uint32_t nowMs) {
     if (client.publish(topic.c_str(), payload.c_str(), true)) {
       ++stats_.publishes;
       snprintf(stats_.lastTopic, sizeof(stats_.lastTopic), "%s", topic.c_str());
+    } else {
+      // PubSubClient refuses a publish that does not fit its buffer, and the
+      // config was simply never mentioned again: the entity was missing in Home
+      // Assistant with nothing anywhere saying why.
+      ++stats_.announceFailures;
+      logEvent("mqtt: discovery for %s/%s refused (%u bytes, buffer %u)", entity.component,
+               entity.object, static_cast<unsigned>(payload.length()), MQTT_BUFFER_SIZE);
     }
   }
   const String availability = String(cfg.mqttBase) + "/status";

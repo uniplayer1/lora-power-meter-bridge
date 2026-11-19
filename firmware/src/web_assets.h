@@ -387,6 +387,8 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       <div class="card"><h3>Leistung</h3>
         <div class="metric" id="m-power">–<small>W</small></div>
         <div class="rows" id="m-phases"></div>
+        <p class="hint">L1/L2/L3 sind die drei Außenleiter eines Drehstromanschlusses –
+          der Zähler liefert sie einzeln, ihre Summe ist die Gesamtleistung.</p>
         <div class="spark"><canvas id="spark" height="64"></canvas><div class="caption" id="spark-cap">Verlauf seit dem Öffnen der Seite</div></div>
       </div>
       <div class="card"><h3>Zählerstand</h3>
@@ -819,7 +821,10 @@ function render() {
   // overview
   $('m-power').innerHTML = num(m.power_w, 0) + '<small>W</small>';
   $('m-import').innerHTML = num(m.import_kwh, 2) + '<small>kWh</small>';
-  const phases = [['L1', m.l1_w], ['L2', m.l2_w], ['L3', m.l3_w]].filter((p) => p[1] !== null && p[1] !== undefined);
+  // L1..L3 are the three outer conductors of a three-phase supply. The label says
+  // so: "L1" alone answers nothing for anyone who is not an electrician.
+  const phases = [['L1 (Außenleiter 1)', m.l1_w], ['L2 (Außenleiter 2)', m.l2_w], ['L3 (Außenleiter 3)', m.l3_w]]
+    .filter((p) => p[1] !== null && p[1] !== undefined);
   const phaseHtml = phases.map((p) => '<div class="row"><span>' + p[0] + '</span><span>' + num(p[1], 0) + ' W</span></div>').join('');
   if ($('m-phases').innerHTML !== phaseHtml) $('m-phases').innerHTML = phaseHtml;
   set('m-export', m.export_kwh === null ? '–' : num(m.export_kwh, 2) + ' kWh');

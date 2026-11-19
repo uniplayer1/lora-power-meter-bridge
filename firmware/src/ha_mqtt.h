@@ -24,6 +24,9 @@ struct MqttStats {
   int lastError = 0;
   char lastTopic[64] = {0};
   bool announced = false;
+  // Discovery configs the broker refused (usually the buffer being too small for a
+  // long one). Counted, so a missing sensor is a number instead of a mystery.
+  uint32_t announceFailures = 0;
 };
 
 class HaMqtt {

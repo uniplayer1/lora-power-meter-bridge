@@ -1109,30 +1109,38 @@ String WebUi::buildHaPackage() const {
     y += "        availability: \"{{ value_json.meter.valid }}\"\n";
   };
 
-  addSensor("import", "Stromzaehler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
+  addSensor("import", "Stromzähler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
             "total_increasing");
-  addSensor("export", "Stromzaehler Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh",
+  addSensor("export", "Stromzähler Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh",
             "energy", "total_increasing");
-  addSensor("power", "Stromzaehler Leistung", "{{ value_json.meter.power_w }}", "W", "power",
+  addSensor("power", "Stromzähler Leistung", "{{ value_json.meter.power_w }}", "W", "power",
             "measurement");
-  addSensor("power_l1", "Stromzaehler Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power",
+  addSensor("power_l1", "Stromzähler Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power",
             "measurement");
-  addSensor("power_l2", "Stromzaehler Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power",
+  addSensor("power_l2", "Stromzähler Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power",
             "measurement");
-  addSensor("power_l3", "Stromzaehler Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power",
+  addSensor("power_l3", "Stromzähler Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power",
             "measurement");
-  addSensor("age", "Stromzaehler Alter der Messung", "{{ value_json.meter.age }}", "s", "duration",
+  addSensor("age", "Stromzähler Alter der Messung", "{{ value_json.meter.age }}", "s", "duration",
             "measurement");
-  addSensor("rssi", "Stromzaehler Link RSSI", "{{ value_json.link.rssi }}", "dBm", "signal_strength",
+  addSensor("rssi", "Stromzähler Link RSSI", "{{ value_json.link.rssi }}", "dBm", "signal_strength",
             "measurement");
-  addSensor("snr", "Stromzaehler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement");
-  addSensor("duty", "Stromzaehler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "", "measurement");
-  addSensor("telegrams", "Stromzaehler Telegramme", "{{ value_json.meter.telegrams }}", "", "",
+  addSensor("snr", "Stromzähler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement");
+  addSensor("duty", "Stromzähler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "", "measurement");
+  addSensor("heap_block", "Stromzähler größter freier Block", "{{ value_json.device.heap_block }}",
+            "B", "", "measurement");
+  // Framing trouble has its own counter: a telegram that never completes is a
+  // different fault from one that arrives and does not decode.
+  addSensor("overflow_errors", "Stromzähler Telegramme zu lang", "{{ value_json.meter.overflow_errors }}",
+            "", "", "total_increasing");
+  addSensor("unframed_errors", "Stromzähler Rahmenfehler", "{{ value_json.meter.unframed_errors }}",
+            "", "", "total_increasing");
+  addSensor("telegrams", "Stromzähler Telegramme", "{{ value_json.meter.telegrams }}", "", "",
             "total_increasing");
-  addSensor("crc", "Stromzaehler Pruefsummenfehler", "{{ value_json.meter.crc_errors }}", "", "",
+  addSensor("crc", "Stromzähler Prüfsummenfehler", "{{ value_json.meter.crc_errors }}", "", "",
             "total_increasing");
-  addSensor("heap", "Stromzaehler freier Speicher", "{{ value_json.device.heap }}", "B", "", "measurement");
-  addSensor("uptime", "Stromzaehler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
+  addSensor("heap", "Stromzähler freier Speicher", "{{ value_json.device.heap }}", "B", "", "measurement");
+  addSensor("uptime", "Stromzähler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
             "total_increasing");
 
   y += "\n    binary_sensor:\n";

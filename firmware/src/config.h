@@ -174,4 +174,6 @@ constexpr uint8_t kSparePin2 = 21;
 // The state document is built into one buffer reserved at boot (see
 // stateJsonBuffer()); MQTT publishes it without the log.
 #define STATE_JSON_RESERVE 14336
-#define MQTT_BUFFER_SIZE 6144
+// One discovery config per entity is ~400 bytes; 6144 was sized for the state
+// document and silently refused the longer ones, so whole entities never appeared.
+#define MQTT_BUFFER_SIZE 8192

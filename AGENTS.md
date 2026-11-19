@@ -38,6 +38,10 @@
 - The USB CDC is not bidirectional the instant the host opens the port.
   `tools/e2e.py` probes with `help` until the board answers; do the same in any
   new harness before concluding the firmware is broken.
+- **PubSubClient silently refuses a publish larger than its buffer.** A discovery
+  config that does not fit never appears - no error, no entity. `MQTT_BUFFER_SIZE`
+  is sized for the longest config (8192) and `announceFailures` counts refusals.
+  Entity names carry German umlauts (the files are UTF-8 and the JSON allows it).
 - **The dashboard JavaScript is a raw string in a C++ header, so nothing compiles
   it.** A stray `}` survived the merge in v0.1.5 and shipped: the page loaded, threw
   on the first parse error and left the owner stuck at a dead login screen with no
