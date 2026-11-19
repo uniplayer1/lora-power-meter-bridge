@@ -87,6 +87,12 @@ place the head on the meter.
   and the airtime used. The display cycles with the BOOT button.
 - **Reset**: web page → *System* → *Werkszustand* starts over from step 3. To
   change only the role, use *System* → *Rolle ändern*.
+- **Code off the display**: *System* → *Anmeldung* → *Code auf dem Display
+  ausblenden*. Meant for a board that stands where visitors walk past it; the
+  code stays the WiFi password, so read it off once before switching it on. It
+  is still in the browser's password manager or your notes. Forgotten and no
+  longer readable: plug the board into USB and run `webpass show on` in the
+  console.
 - **Update**: web page → *System* → *Firmware-Update*, pick the
   `…-update.bin` from the latest release. Settings are kept. Details:
   [FLASHING.md](FLASHING.md#2-updating-later-over-wifi-ota).

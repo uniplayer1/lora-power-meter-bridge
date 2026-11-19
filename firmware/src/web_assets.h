@@ -219,7 +219,8 @@ static const char kLoginHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div class="card">
     <h1>Power Meter</h1>
     <p class="muted small">Melde dich mit dem Zugangscode an. Er steht auf dem Display des Geräts
-      (Seite „Zugang“) und ist zugleich das Passwort des Geräte-WLANs.</p>
+      (Seite „Zugang“) und ist zugleich das Passwort des Geräte-WLANs – solange sie dort nicht
+    ausgeblendet wurde (<i>System</i> → <i>Anmeldung</i>).</p>
     <!--ERR-->
     <form method="POST" action="/login">
       <label for="pw">Zugangscode</label>
@@ -630,10 +631,20 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       </div>
 
       <div class="card"><h3>Anmeldung</h3>
-        <div class="rows"><div class="row"><span>Dashboard-Passwort</span><span id="pw-state">–</span></div></div>
+        <div class="rows">
+          <div class="row"><span>Dashboard-Passwort</span><span id="pw-state">–</span></div>
+          <div class="row"><span>Code auf dem Display</span><span id="code-state">–</span></div>
+        </div>
+        <label class="switch" for="hidecode" data-sync>
+          <input type="checkbox" id="hidecode"><span class="track"></span>
+          <span><b>Code auf dem Display ausblenden</b>Gilt für die Seite „Zugang“ und den Einrichtungs-Bildschirm.
+            Der Code bleibt WLAN-Passwort – wer ihn braucht, liest ihn vorher ab. Vergessen? Nur am
+            USB-Anschluss wieder einblendbar: <code>webpass show on</code> in der Konsole.</span>
+        </label>
         <label for="newpass">Eigenes Passwort</label>
         <input id="newpass" type="password" placeholder="mind. 8 Zeichen" minlength="8" autocomplete="new-password">
-        <p class="hint">Ab dann gilt der Code vom Display nicht mehr als Anmeldung – nur noch als WLAN-Passwort.</p>
+        <p class="hint">Ab dann gilt der Code vom Display nicht mehr als Anmeldung – nur noch als WLAN-Passwort.
+          Das Ausblenden oben betrifft nur das Display, nicht das WLAN.</p>
         <div class="actions">
           <button class="primary" id="saveAccess">Übernehmen</button>
           <button class="ghost" id="logoutBtn">Abmelden</button>
@@ -715,7 +726,7 @@ function toast(msg, bad) {
 const FIELD_LABELS = {
   freq: 'Frequenz', sf: 'Spreading Factor', power: 'Sendeleistung', interval: 'Sendeintervall',
   protocol: 'Protokoll', polarity: 'Polarität', apname: 'WLAN-Name (mind. 4 Zeichen)',
-  apcode: 'Zugangscode (8–15 Buchstaben/Ziffern)', newpass: 'Passwort (mind. 8 Zeichen)',
+  apcode: 'Zugangscode (8–15 Buchstaben/Ziffern)', newpass: 'Passwort (mind. 8 Zeichen)', hidecode: 'Display-Anzeige',
   mqttPort: 'Port'
 };
 
@@ -951,6 +962,7 @@ function render() {
     wifiWarn.textContent = msg; show(wifiWarn, !!msg);
   }
   fill('ssid', w.sta_ssid); fill('keepap', w.keep_ap); fill('apname', w.ap_ssid);
+  fill('hidecode', state.device.hide_code);
 
   // Home Assistant
   set('ha-url', state.ha.url);
@@ -974,6 +986,7 @@ function render() {
   }
   fill('devname', d.name);
   set('pw-state', d.web_password_custom ? 'eigenes' : 'Code vom Display');
+  set('code-state', d.hide_code ? 'ausgeblendet' : 'sichtbar');
   if (state.oled) {
     set('oled-page', state.oled.page + ' von ' + state.oled.pages);
     set('oled-btn', state.oled.button ? 'gedrückt' : 'losgelassen');
@@ -1110,7 +1123,11 @@ function initApp() {
     clear: ['apcode'],
     check: (d) => (d.apcode && !/^[A-Za-z0-9]{8,15}$/.test(d.apcode)) ? 'Der Code braucht 8–15 Buchstaben oder Ziffern' : ''
   });
-  bindSave('saveAccess', ['newpass'], { check: (d) => (d.newpass.length < 8) ? 'Das Passwort braucht mindestens 8 Zeichen' : '' });
+  // newpass empty means "leave the password alone", which is what the switch above
+  // does on its own - otherwise hiding the code would demand a new password first.
+  bindSave('saveAccess', ['hidecode', 'newpass'], {
+    check: (d) => (d.newpass.length > 0 && d.newpass.length < 8) ? 'Das Passwort braucht mindestens 8 Zeichen' : ''
+  });
   bindSave('saveDevice', ['devname']);
   bindSave('saveMqtt', ['mqttHost', 'mqttPort', 'mqttUser', 'mqttPass'], { check: (d) => d.mqttHost ? '' : 'Bitte einen Broker eintragen' });
   const mqttOff = $('mqttOff');

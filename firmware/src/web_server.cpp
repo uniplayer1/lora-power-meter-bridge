@@ -214,9 +214,14 @@ void WebUi::handleLoginPage() {
   // The error slot is filled only when a login attempt actually failed; a
   // silent bounce back to the same form is indistinguishable from a broken page.
   if (server_.hasArg("e")) {
-    page.replace("<!--ERR-->",
-                 "<p class=\"bad\">Code stimmt nicht. Der Code steht auf dem OLED "
-                 "(Seite „Zugang\u201c) und lautet auch das WLAN-Passwort.</p>");
+    // Point at the display only while the code is actually readable there: telling
+      // somebody to read a screen that has it hidden is worse than saying nothing.
+      const String hint = configStore.get().hideCodeOnDisplay
+          ? String("Code stimmt nicht. Das Display zeigt ihn nicht an – er ist nur das "
+                 "Passwort dieses WLANs und steht in deinen Notizen aus dem Setup.")
+        : String("Code stimmt nicht. Der Code steht auf dem OLED (Seite „Zugang\u201c) und "
+                 "lautet auch das WLAN-Passwort.");
+    page.replace("<!--ERR-->", "<p class=\"bad\">" + hint + "</p>");
   } else {
     page.replace("<!--ERR-->", "");
   }
@@ -357,9 +362,10 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
     const uint32_t synced = clockSyncedAtMs();
     j += ",\"time_synced_s\":" + (epochMs && synced ? String(ageSeconds(now, synced)) : String("null"));
   }
-  // Whether the dashboard password is still the code from the display. The
-  // password itself is never sent anywhere.
-  j += ",\"web_password_custom\":" +
+  // Whether the code from the display is hidden there, and whether the owner set
+  // a dashboard password of their own. Neither password itself is ever sent.
+  j += "\"hide_code\":" + String(cfg.hideCodeOnDisplay ? "true" : "false") + ",";
+  j += "\"web_password_custom\":" +
        String(strcmp(cfg.webPassword, cfg.apPassword) == 0 ? "false" : "true");
   j += ",\"can_configure\":" + String(canConfigure ? "true" : "false");
   j += "},";
@@ -693,6 +699,8 @@ bool WebUi::applySaveField(const String& key, const String& value) {
     if (value.length() > 0) strncpy(cfg.staPass, value.c_str(), sizeof(cfg.staPass) - 1);
   } else if (key == "keepap") {
     cfg.keepApOn = on;
+  } else if (key == "hidecode") {
+    cfg.hideCodeOnDisplay = on;
   } else if (key == "newpass") {
     // Empty means "leave it"; anything shorter than 8 is refused, not dropped.
     if (value.length() == 0) return true;

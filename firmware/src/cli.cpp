@@ -30,6 +30,7 @@ void printHelp() {
   Serial.println(F("  provision meter|gateway [name]   set the role and restart"));
   Serial.println(F("  log                 the on-device event log (incl. login attempts)"));
   Serial.println(F("  webpass [<new>|reset]  show/change/reset the web login code"));
+  Serial.println(F("  webpass show on|off    show or hide the access code on the display"));
   Serial.println(F("  page [next|N]       show or set the OLED page"));
   Serial.println(F("  mqtt host <addr> [port]  point the device at a broker"));
   Serial.println(F("  mqtt off            broker off"));
@@ -207,6 +208,13 @@ void handleCommand(const String& line, RadioLink& link, MeterReader& meter) {
     argument.trim();
     if (argument.length() == 0) {
       Serial.printf("web password '%s' / ap code '%s'\n", cfg.webPassword, cfg.apPassword);
+    } else if (argument == "show on" || argument == "show off") {
+      // The way back when the code was hidden on the display and then forgotten.
+      cfg.hideCodeOnDisplay = (argument == "show off");
+      configStore.save();
+      displayUi.nextPage();  // redraw now rather than up to a second later
+      Serial.printf("display: access code %s (ap code '%s')\n",
+                    cfg.hideCodeOnDisplay ? "hidden" : "shown", configStore.setupCode());
     } else if (argument == "reset") {
       snprintf(cfg.webPassword, sizeof(cfg.webPassword), "%s", cfg.apPassword);
       configStore.save();

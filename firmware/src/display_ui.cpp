@@ -140,13 +140,27 @@ void DisplayUi::drawAccessPage(const char* title, bool accessPoint) {
   //     or nobody can join the network the page is served from;
   //   * the dashboard password - the owner's, and once it is set individually
   //     the board stops being allowed to publish it.
+  // Either of them can be hidden from the screen on request - see the "hidden"
+  // branch below.
   const bool customDashboardPassword =
       strcmp(configStore.get().webPassword, configStore.setupCode()) != 0;
+
+  // The owner can keep the code off the screen entirely: a board in a shared
+  // hallway or next to the meter box should not hand the WLAN password to
+  // whoever walks past it.
+  const bool hidden = configStore.get().hideCodeOnDisplay;
 
   drawHeader(title);
   display_.setFont(u8g2_font_5x7_tf);
 
-  if (customDashboardPassword) {
+  if (hidden) {
+    display_.drawStr(0, 26, "Zugangscode:");
+    display_.drawStr(0, 38, "ausgeblendet");
+    display_.setFont(u8g2_font_4x6_tf);
+    display_.drawStr(0, 52, customDashboardPassword ? "Dashboard: eigenes Passwort"
+                                                    : "Code ist auch WLAN-Passwort");
+    display_.drawStr(0, 62, "Einblenden: USB-Konsole");
+  } else if (customDashboardPassword) {
     display_.drawStr(0, 22, "Dashboard-Passwort:");
     display_.drawStr(0, 32, "geaendert (eigenes)");
     display_.drawStr(0, 44, "WLAN-Code:");
@@ -178,6 +192,15 @@ void DisplayUi::drawUnprovisioned() {
   display_.drawStr(0, 32, configStore.apSsid());
   display_.drawStr(0, 44, "Code:");
   display_.setFont(u8g2_font_6x12_tf);
+  if (configStore.get().hideCodeOnDisplay) {
+    // Not even the first-run screen: the code is what makes the board usable, so
+    // somebody who hides it must have read it here once first - or plugged it in
+    // over USB and typed "webpass show on".
+    display_.setFont(u8g2_font_5x7_tf);
+    display_.drawStr(0, 56, "ausgeblendet");
+    display_.drawStr(0, 64, "USB: webpass show on");
+    return;
+  }
   display_.drawStr(0, 56, configStore.setupCode());
   display_.setFont(u8g2_font_5x7_tf);
   display_.drawStr(0, 64, "dann http://192.168.4.1");

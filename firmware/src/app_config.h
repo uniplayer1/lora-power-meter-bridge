@@ -89,6 +89,12 @@ struct DeviceConfig {
   // are also on the expansion header; any pin meterPinAllowed() accepts works.
   uint8_t meterRxPin;
   uint8_t meterTxPin;
+
+  // Keep the access code off the OLED. The code is the access point's password
+  // AND the first web login, and a display in a shared hallway or next to the
+  // meter box shows it to anyone walking past. The CLI (webpass show on) is the
+  // way back in if the code is ever forgotten and not written down.
+  bool hideCodeOnDisplay;
 };
 
 inline bool mqttConfigured(const DeviceConfig& cfg) {

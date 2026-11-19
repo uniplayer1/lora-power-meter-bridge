@@ -284,7 +284,8 @@ void ConfigStore::applyDefaults() {
   cfg_.loraPowerDbm = LORA_DEFAULT_POWER_DBM;
 
   generateSetupCode();
-cfg_.keepApOn = false;
+  cfg_.keepApOn = false;
+  cfg_.hideCodeOnDisplay = false;
 
   cfg_.staConfigured = false;
   cfg_.haEnabled = true;
