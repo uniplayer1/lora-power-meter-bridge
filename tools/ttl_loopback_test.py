@@ -17,10 +17,9 @@ import glob
 import sys
 import time
 
-try:
-    import serial
-except ImportError:
-    sys.exit("pyserial is required")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+
+from serial_util import open_port
 
 PATTERN = bytes([0x55, 0xAA, 0x1B, 0x1B, 0x01, 0x02, 0x7F, 0x80, 0xFE, 0x00])
 
@@ -41,10 +40,8 @@ def main() -> int:
         print("No USB serial adapter found (/dev/ttyUSB* is empty).")
         return 1
 
-    try:
-        ser = serial.Serial(port, args.baud, timeout=0.5)
-    except Exception as err:  # noqa: BLE001
-        print(f"cannot open {port}: {err}")
+    ser = open_port(port, args.baud, timeout=0.5)
+    if ser is None:
         return 1
 
     print(f"{port} @ {args.baud} baud, TXD <-> RXD jumpered?")

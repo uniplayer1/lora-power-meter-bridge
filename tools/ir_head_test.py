@@ -22,10 +22,9 @@ import glob
 import sys
 import time
 
-try:
-    import serial
-except ImportError:
-    sys.exit("pyserial is required")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+
+from serial_util import open_port
 
 
 def find_port() -> str | None:
@@ -51,10 +50,8 @@ def main() -> int:
         print("(charge-only cables are the usual cause) and plug it in directly.")
         return 1
 
-    try:
-        ser = serial.Serial(port, args.baud, timeout=0.1)
-    except Exception as err:  # noqa: BLE001
-        print(f"cannot open {port}: {err}")
+    ser = open_port(port, args.baud, timeout=0.1)
+    if ser is None:
         return 1
 
     print(f"{port} @ {args.baud} baud, {args.seconds:.0f}s. Now hold a TV remote at the head")

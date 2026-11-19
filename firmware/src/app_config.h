@@ -161,6 +161,11 @@ class ConfigStore {
 // Process-wide instance: there is exactly one device configuration.
 extern ConfigStore configStore;
 
-// On-device event log, surfaced in the web UI.
-extern core::RingLog<String, LOG_CAPACITY> eventLog;
+// On-device event log, surfaced in the web UI. Fixed-size lines: a ring of
+// Strings reallocated on every entry fragmented the heap until the state page
+// could no longer be built.
+struct LogLine {
+  char text[128];
+};
+extern core::RingLog<LogLine, LOG_CAPACITY> eventLog;
 void logEvent(const char* fmt, ...);

@@ -974,7 +974,8 @@ function render() {
   }
 
   // System
-  set('s-fw', d.fw); set('s-mac', d.mac); set('s-heap', Math.round(d.heap / 1024) + ' kB'); set('s-up', fmtDuration(d.uptime));
+  set('s-fw', d.fw); set('s-mac', d.mac); set('s-heap', Math.round(d.heap / 1024) + ' kB' +
+    (d.heap_block ? ' · größter Block ' + Math.round(d.heap_block / 1024) + ' kB · Tiefstwert ' + Math.round(d.heap_min / 1024) + ' kB' : '')); set('s-up', fmtDuration(d.uptime));
   if (d.time) {
     // The device's own clock, so a wrong one is visible next to the phone's.
     const t = new Date(d.time * 1000).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'medium' });
@@ -1031,17 +1032,27 @@ function drawSpark() {
   set('spark-cap', 'Letzte ' + (secs < 120 ? secs + ' s' : Math.round(secs / 60) + ' min') + ' · ' + num(min, 0) + '–' + num(max, 0) + ' W');
 }
 
+let pollFailures = 0;
 async function poll() {
+  let reason = 'Gerät nicht erreichbar';
   try {
     const res = await fetch(withToken('/api/state'));
-    if (!res.ok) throw new Error('http ' + res.status);
+    if (!res.ok) {
+      // The device says why (e.g. 503 "Speicher knapp") - show that, not a blank page.
+      try { const j = await res.json(); if (j && j.message) reason = j.message; } catch (e2) { reason = 'Fehler ' + res.status; }
+      throw new Error(reason);
+    }
     state = await res.json();
+    pollFailures = 0;
     render();
     showBuildBanner(false);
   } catch (e) {
     // A build whose state does not parse shows as nothing at all: every field "–".
-    // Say why instead of leaving the page looking like a dead device.
+    // Say why instead of leaving the page looking like a dead device - the device
+    // itself may be measuring perfectly well.
     showBuildBanner(true, e);
+    if (++pollFailures === 2) toast('Keine aktuellen Daten: ' + (e && e.message ? e.message : reason), true);
+    if (pollFailures >= 2) set('link', 'keine Daten');
   }
 }
 
@@ -1056,8 +1067,10 @@ function showBuildBanner(broken, err) {
     el.className = 'card bad-card';
     document.querySelector('.wrap').prepend(el);
   }
-  el.textContent = 'Die Firmware meldet ihren Zustand fehlerhaft – die Seite kann ihn nicht lesen. ' +
-    'Betroffen ist nur diese Anzeige, nicht die Messung. Bitte ein neueres Update einspielen.';
+  el.textContent = 'Die Firmware meldet ihren Zustand fehlerhaft – die Seite kann ihn nicht lesen ' +
+    '(' + (err && err.message ? err.message : 'unbekannt') + '). Betroffen ist nur diese Anzeige, ' +
+    'nicht die Messung. Bitte ein neueres Update einspielen.';
+}
 }
 
 function selectTab(name) {

@@ -24,26 +24,29 @@ import sys
 import threading
 import time
 
-try:
-    import serial
-except ImportError:
-    sys.exit(2)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+
+from serial_util import open_port
 
 
 def collect(port: str, seconds: float, results: dict[str, list[str]]) -> None:
     lines: list[str] = []
-    try:
-        with serial.Serial(port, 115200, timeout=0.3) as ser:
-            deadline = time.time() + seconds
-            while time.time() < deadline:
-                raw = ser.readline()
-                if not raw:
-                    continue
-                text = raw.decode("utf-8", "replace").rstrip()
-                if text:
-                    lines.append(text)
-    except Exception:
+    ser = open_port(port, 115200, timeout=0.3)
+    if ser is None:
         return
+    try:
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            raw = ser.readline()
+            if not raw:
+                continue
+            text = raw.decode("utf-8", "replace").rstrip()
+            if text:
+                lines.append(text)
+    except Exception:  # noqa: BLE001
+        return
+    finally:
+        ser.close()
     if lines:
         results[port] = lines
 

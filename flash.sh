@@ -185,7 +185,9 @@ check_port() {
         return 1
     fi
     if [ ! -w "$port" ]; then
-        warn "No write permission on $port — you may need: sudo usermod -aG dialout \$USER"
+        warn "No write permission on $port — install the shipped rule once:"
+        warn "  sudo install -m644 udev/99-lora-power.rules /etc/udev/rules.d/"
+        warn "  sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=tty"
     fi
     return 0
 }

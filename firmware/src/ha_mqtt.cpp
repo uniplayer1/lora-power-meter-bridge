@@ -98,9 +98,9 @@ String discoveryPayload(const DeviceConfig& cfg, const Entity& entity) {
 void HaMqtt::begin(const DeviceConfig& config) {
   stats_.enabled = mqttConfigured(config);
   if (!stats_.enabled) return;
-  // A meter update with the per-phase values is around 500 bytes; the default
-  // 256-byte buffer would silently truncate the publish.
-  client.setBufferSize(2048);
+  // The state document (without the event log) is a few kilobytes; a publish
+  // larger than this buffer is refused outright, and 2048 was too small for it.
+  client.setBufferSize(MQTT_BUFFER_SIZE);
   client.setServer(config.mqttHost, config.mqttPort);
   stats_.lastConnectAttemptMs = 0;
   logEvent("mqtt: broker %s:%u, base %s", config.mqttHost, config.mqttPort, config.mqttBase);
@@ -114,7 +114,7 @@ void HaMqtt::applyConfig(const DeviceConfig& config) {
     logEvent("mqtt: disabled");
     return;
   }
-  client.setBufferSize(2048);
+  client.setBufferSize(MQTT_BUFFER_SIZE);
   client.setServer(config.mqttHost, config.mqttPort);
   if (client.connected()) client.disconnect();
   stats_.lastConnectAttemptMs = 0;
@@ -175,7 +175,8 @@ void HaMqtt::publishState(uint32_t nowMs, const MeterReader& meter, const RadioL
   if (!stats_.enabled || !client.connected()) return;
   const DeviceConfig& cfg = configStore.get();
   const String topic = String(cfg.mqttBase) + "/state";
-  const String payload = buildStateJson(link, meter, false, false);
+  String& payload = stateJsonBuffer();
+  if (!buildStateJson(payload, link, meter, false, false, false)) return;
   if (client.publish(topic.c_str(), payload.c_str(), true)) {
     ++stats_.publishes;
     stats_.lastPublishMs = nowMs;
@@ -222,7 +223,8 @@ String HaMqtt::describeDiscovery(const DeviceConfig& config, const MeterReader& 
     out += "  " + discoveryPayload(config, entity) + "\n";
   }
   out += "\nstate payload (this is what the entities read):\n  ";
-  out += buildStateJson(link, meter, false, false);
+  String& state = stateJsonBuffer();
+  if (buildStateJson(state, link, meter, false, false, false)) out += state;
   out += "\n";
   return out;
 }

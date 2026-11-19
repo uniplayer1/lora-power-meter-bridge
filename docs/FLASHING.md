@@ -54,8 +54,18 @@ you want for a new board.
 1. Hold **BOOT**, press and release **RST**, then release **BOOT**. The board is
    now in download mode and stays there.
 2. Flash again. Afterwards press **RST** so the firmware starts.
-3. Still nothing: try another cable or USB port. On Linux, add your user to the
-   `dialout` group (or `uucp` on Arch).
+3. Still nothing: try another cable or USB port.
+4. On Linux the port comes up owned by `root` and your user cannot open it, which
+   looks exactly like a dead board. Install the rule from this repository once:
+
+   ```bash
+   sudo install -m644 udev/99-lora-power.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=tty
+   ```
+
+   It makes the board's `ttyACM` port writable, and tells ModemManager to keep
+   its hands off the USB-to-TTL adapter in front of the IR head (it otherwise
+   holds that port open, and the tools report `device busy`).
 
 ### Next step
 

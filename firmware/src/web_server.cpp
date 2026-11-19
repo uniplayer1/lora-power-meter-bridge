@@ -74,6 +74,8 @@ String zeroPad4(uint16_t v) {
 void WebUi::begin(RadioLink* link, MeterReader* meter) {
   link_ = link;
   meter_ = meter;
+  // Reserved now, while the heap is still in one piece.
+  stateJsonBuffer();
 
   server_.on("/", HTTP_GET, [this]() { handleRoot(); });
   server_.on("/setup", HTTP_GET, [this]() { handleSetupPage(); });
@@ -334,8 +336,20 @@ void WebUi::handleNotFound() {
 
 // ── api ──────────────────────────────────────────────────────
 
-String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, bool apClient,
-                      bool canConfigure) {
+String& stateJsonBuffer() {
+  // Sized for the full document with a full event log (48 lines of up to 128
+  // characters, escaped) plus the rest, with room to spare.
+  static String buffer;
+  static bool reserved = false;
+  if (!reserved) {
+    reserved = buffer.reserve(STATE_JSON_RESERVE);
+    if (!reserved) logEvent("state buffer: could not reserve %u bytes", STATE_JSON_RESERVE);
+  }
+  return buffer;
+}
+
+bool buildStateJson(String& out, const RadioLink& linkRef, const MeterReader& meterRef, bool apClient,
+                    bool canConfigure, bool includeLog) {
   const DeviceConfig& cfg = configStore.get();
   const RadioLink* link = &linkRef;
   const MeterReader* meter = &meterRef;
@@ -344,7 +358,9 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   const core::MeterValues& values = meter->values();
   const uint32_t now = millis();
 
-  String j = "{";
+  String& j = out;
+  j.remove(0);  // keeps the reserved capacity
+  j += "{";
 
   j += "\"device\":{";
   j += "\"name\":\"" + escapeJson(cfg.deviceName[0] ? String(cfg.deviceName) : String("Power Meter")) + "\",";
@@ -352,6 +368,9 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += cfg.role == DeviceRole::Meter ? "meter" : (cfg.role == DeviceRole::Gateway ? "gateway" : "unset");
   j += "\",\"fw\":\"" FW_ID "\",\"mac\":\"" + String(configStore.macString()) + "\",";
   j += "\"uptime\":" + String(now / 1000) + ",\"heap\":" + String(ESP.getFreeHeap());
+  // The lowest free heap since boot and the largest block that can still be
+  // allocated: a leak shows in the first, fragmentation in the second.
+  j += ",\"heap_min\":" + String(ESP.getMinFreeHeap()) + ",\"heap_block\":" + String(ESP.getMaxAllocHeap());
   j += ",\"host\":\"" + netHostName() + ".local\"";
   // Wall clock: seconds since 1970 (null while unset), where it came from, and
   // how long ago it was last synchronised.
@@ -364,8 +383,9 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   }
   // Whether the code from the display is hidden there, and whether the owner set
   // a dashboard password of their own. Neither password itself is ever sent.
-    j += ",\"hide_code\":" + String(cfg.hideCodeOnDisplay ? "true" : "false") + ",";
-  j += "\"web_password_custom\":" +
+  j += ",\"hide_code\":" + String(cfg.hideCodeOnDisplay ? "true" : "false");
+  j += ",\"web_password_custom\":" +
+       String(strcmp(cfg.webPassword, cfg.apPassword) == 0 ? "false" : "true");
   j += ",\"can_configure\":" + String(canConfigure ? "true" : "false");
   j += "},";
 
@@ -536,15 +556,21 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
        String(displayUi.buttonDown() ? "true" : "false") + "},";
 
   j += "\"log\":[";
-  for (size_t i = 0; i < eventLog.size(); ++i) {
-    String line;
-    if (eventLog.at(i, line)) {
-      if (i > 0) j += ",";
-      j += "\"" + escapeJson(line) + "\"";
+  if (includeLog) {
+    for (size_t i = 0; i < eventLog.size(); ++i) {
+      LogLine line;
+      if (eventLog.at(i, line)) {
+        if (i > 0) j += ',';
+        j += '"';
+        appendJsonEscaped(j, line.text);
+        j += '"';
+      }
     }
   }
   j += "]}";
-  return j;
+  // A failed append leaves the String as it was, so a document that ran out of
+  // memory half way does not end where a complete one does.
+  return j.endsWith("]}");
 }
 
 void WebUi::handleState() {
@@ -552,7 +578,18 @@ void WebUi::handleState() {
   // REST sensors nor the custom integration have a way to log in. Nothing that
   // *changes* the device is reachable without a session, and the access code in
   // the payload is only filled in for clients on the device's own access point.
-  sendJson(200, buildStateJson(*link_, *meter_, isApClient(), mayConfigure()));
+  String& j = stateJsonBuffer();
+  if (!buildStateJson(j, *link_, *meter_, isApClient(), mayConfigure())) {
+    static uint32_t lastWarnMs = 0;
+    if (lastWarnMs == 0 || millis() - lastWarnMs > 60000) {
+      lastWarnMs = millis();
+      logEvent("state: out of memory (free %u, largest block %u)", ESP.getFreeHeap(),
+               ESP.getMaxAllocHeap());
+    }
+    sendJson(503, "{\"ok\":false,\"message\":\"Speicher knapp - Gerät neu starten\"}");
+    return;
+  }
+  sendJson(200, j);
 }
 
 void WebUi::handleScan() {

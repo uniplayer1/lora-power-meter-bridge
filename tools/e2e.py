@@ -19,17 +19,21 @@ import subprocess
 import sys
 import time
 
-try:
-    import serial
-except ImportError:
-    sys.exit("pyserial is required")
+import serial
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+
+from serial_util import open_port
 
 
 class Board:
     def __init__(self, port: str, timeout: float = 8.0):
         self.port = port
         self.timeout = timeout
-        self.ser = serial.Serial(port, 115200, timeout=0.2)
+        ser = open_port(port, 115200, timeout=0.2)
+        if ser is None:
+            raise SystemExit(1)
+        self.ser: serial.Serial = ser
         self.ser.reset_input_buffer()
 
     def close(self) -> None:
@@ -90,9 +94,14 @@ def find_port() -> str | None:
         out = subprocess.check_output(
             [sys.executable, "tools/serial_find.py", "--timeout", "12"],
             text=True,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as err:
+        # serial_find.py explains on stderr why a port that exists produced
+        # nothing (unreadable, held open). Reporting only "no board is talking"
+        # hid exactly that reason.
+        if err.stderr:
+            print(err.stderr.strip())
         return None
     ports = [line.strip() for line in out.splitlines() if line.strip()]
     return ports[0] if ports else None
@@ -132,10 +141,10 @@ def main() -> int:
         config_dump = board.command("config", 5.0)
         check("config dump answers", "schema=" in config_dump)
         check("meter protocol is configurable", "protocol=" in config_dump)
+        power = re.search(r"power=(\d+)dBm", config_dump)
         check("radio stays inside the legal power limit",
-              re.search(r"power=(\d+)dBm", config_dump) is not None
-              and int(re.search(r"power=(\d+)dBm", config_dump).group(1)) <= 14,
-              re.search(r"power=\d+dBm", config_dump).group(0) if "power=" in config_dump else "")
+              power is not None and int(power.group(1)) <= 14,
+              power.group(0) if power else "")
 
         duty = board.command("duty", 5.0)
         budget = re.search(r"budget=(\d+)ms", duty)

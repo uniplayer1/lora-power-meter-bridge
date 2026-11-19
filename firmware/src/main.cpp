@@ -246,11 +246,20 @@ void loop() {
   // which /dev/ttyACM* it landed on, quiet enough to stay out of the way.
   if (now - lastIdentityMs > 5000) {
     lastIdentityMs = now;
-    Serial.printf("[HB] %s up=%lus role=%d peer=%d meter=%s heap=%lu duty=%lu%%\n", FW_TOKEN,
-                  (unsigned long)(now / 1000), static_cast<int>(configStore.get().role),
+    Serial.printf("[HB] %s up=%lus role=%d peer=%d meter=%s heap=%lu min=%lu block=%lu duty=%lu%%\n",
+                  FW_TOKEN, (unsigned long)(now / 1000), static_cast<int>(configStore.get().role),
                   radioLink.stats().peerOnline ? 1 : 0, meterReader.activeProtocolName(),
-                  (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
+                  (unsigned long)ESP.getMaxAllocHeap(),
                   (unsigned long)radioLink.budget().usedPercent(now));
+    // Said in the event log too, where the owner can see it: memory running out
+    // is what made the web page go blank while everything else carried on.
+    static uint32_t lastHeapWarnMs = 0;
+    if (ESP.getMaxAllocHeap() < 16384 && (lastHeapWarnMs == 0 || now - lastHeapWarnMs > 600000UL)) {
+      lastHeapWarnMs = now;
+      logEvent("memory low: free %lu, largest block %lu", (unsigned long)ESP.getFreeHeap(),
+               (unsigned long)ESP.getMaxAllocHeap());
+    }
   }
 
   if (webUi.restartPending() && now >= webUi.restartAtMs()) {

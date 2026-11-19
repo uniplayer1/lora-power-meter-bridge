@@ -171,3 +171,7 @@ constexpr uint8_t kSparePin2 = 21;
 // ── Storage ──────────────────────────────────────────────────
 #define CFG_NAMESPACE "powermeter"
 #define LOG_CAPACITY 48
+// The state document is built into one buffer reserved at boot (see
+// stateJsonBuffer()); MQTT publishes it without the log.
+#define STATE_JSON_RESERVE 14336
+#define MQTT_BUFFER_SIZE 6144

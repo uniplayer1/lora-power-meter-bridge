@@ -1,0 +1,25 @@
+# udev rules for the LoRa power-meter bridge
+#
+# Install once:
+#   sudo install -m644 udev/99-lora-power.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=tty
+#
+# Two devices are involved and both come up root-owned, so opening them without
+# sudo already needs a group the desktop user is not in (dialout).
+
+# 1. The ESP32-S3's built-in USB-Serial/JTAG (the board's console and flashing
+#    port). It re-enumerates under a new ttyACM number after every reset, so the
+#    rule matches the chip, never a number.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", MODE="0666"
+
+# 2. The USB-to-TTL adapter (CH340) in front of the IR read head. ModemManager
+#    claims every serial port that looks like a modem and holds it open, which
+#    shows up as "device busy" - tell it not to touch this one.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# 3. Any other USB serial adapter of the same family (CH341/CH9102, CP210x,
+#    FTDI) - one of these is what a loopback test is run against.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0666"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", MODE="0666"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", MODE="0666"
