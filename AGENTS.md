@@ -38,6 +38,13 @@
 - The USB CDC is not bidirectional the instant the host opens the port.
   `tools/e2e.py` probes with `help` until the board answers; do the same in any
   new harness before concluding the firmware is broken.
+- **The dashboard JavaScript is a raw string in a C++ header, so nothing compiles
+  it.** A stray `}` survived the merge in v0.1.5 and shipped: the page loaded, threw
+  on the first parse error and left the owner stuck at a dead login screen with no
+  working tabs. `python3 tools/check_web_assets.py` extracts both literals exactly
+  as the firmware serves them and runs `node --check` (CI job *web assets*).
+  Run it after any edit to `web_assets.h`; a compile and a green native test run
+  say nothing about it.
 - **`/api/state` is a hand-built JSON string, and one missing comma empties the
   whole dashboard.** The page's poll keeps the last good state on a parse error,
   so a malformed document shows every field as "–" and looks exactly like a
@@ -76,7 +83,8 @@
 
 - `./flash.sh` — builds, flashes every board, and reads the firmware stamp back
   off each one to prove the new image is really running.
-- `./flash.sh native` — 30 host unit tests (SML, packet codec, duty cycle, crypto).
+- `./flash.sh native` — 33 host unit tests (SML, packet codec, duty cycle, crypto).
+- `python3 tools/check_web_assets.py` — syntax-checks the shipped dashboard JS/CSS.
 - `python3 tools/e2e.py` — 11 on-device checks over USB, including the meter
   simulator driving real SML telegrams through the parser.
 - `./flash.sh monitor` then `meter loopback on` with TX jumpered to RX (GPIO40→39) —

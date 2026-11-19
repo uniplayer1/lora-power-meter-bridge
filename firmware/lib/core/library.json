@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Hardware-independent core: SML meter parser, LoRa packet codec, legal duty-cycle accounting and ring buffers. No Arduino headers - compiled by the native test env and by the firmware.",
   "build": {
     "flags": ["-std=gnu++17"]

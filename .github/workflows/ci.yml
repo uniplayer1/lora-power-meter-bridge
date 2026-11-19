@@ -39,13 +39,29 @@ jobs:
         working-directory: firmware
         run: pio test -e native
 
-  integration-syntax:
-    name: Home Assistant integration
+  web-assets:
+    name: web assets (syntax)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
+          node-version: "20"
+        # The page is a raw string inside a C++ header, so nothing compiled it and
+        # a stray brace shipped twice: the dashboard then loads, dies on the first
+        # parse error and leaves the owner stuck. Both files are extracted exactly
+        # as the firmware serves them.
+        - name: Syntax-check the shipped JavaScript and CSS
+          run: |
+          python3 tools/check_web_assets.py
+
+    integration-syntax:
+      name: Home Assistant integration
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with:
           python-version: "3.12"
       - name: Byte-compile the custom component
         run: python -m compileall -q custom_components/lilygo_power

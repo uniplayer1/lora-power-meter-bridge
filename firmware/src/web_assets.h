@@ -1071,7 +1071,6 @@ function showBuildBanner(broken, err) {
     '(' + (err && err.message ? err.message : 'unbekannt') + '). Betroffen ist nur diese Anzeige, ' +
     'nicht die Messung. Bitte ein neueres Update einspielen.';
 }
-}
 
 function selectTab(name) {
   wantedTab = name;
