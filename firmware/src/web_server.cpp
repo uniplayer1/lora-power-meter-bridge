@@ -397,6 +397,7 @@ String buildStateJson(const RadioLink& linkRef, const MeterReader& meterRef, boo
   j += "\"ip\":\"" + netIp() + "\",";
   j += "\"ap_ssid\":\"" + escapeJson(String(configStore.apSsid())) + "\",";
   j += "\"ap_up\":" + String(netApUp() ? "true" : "false") + ",";
+  j += "\"ap_off_in_s\":" + String(netApOffInS()) + ",";
   j += "\"setup_mode\":" + String(netInSetupMode() ? "true" : "false") + ",";
   j += "\"portal\":" + String(netPortalActive() ? "true" : "false") + ",";
   j += "\"keep_ap\":" + String(cfg.keepApOn ? "true" : "false") + ",";

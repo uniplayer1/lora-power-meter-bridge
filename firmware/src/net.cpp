@@ -107,6 +107,15 @@ void netBegin() {
   startMdns();
 }
 
+int32_t netApOffInS() {
+  const DeviceConfig& cfg = configStore.get();
+  const bool wantSta = cfg.staConfigured && cfg.staSsid[0] != '\0';
+  if (!apUp || !wantSta || cfg.keepApOn || cfg.role != DeviceRole::Gateway) return -1;
+  if (WiFi.status() != WL_CONNECTED || staUpSinceMs == 0) return -1;
+  const uint32_t up = millis() - staUpSinceMs;
+  return up >= STA_STABLE_MS ? 0 : static_cast<int32_t>((STA_STABLE_MS - up) / 1000UL);
+}
+
 void netStopAccessPoint() {
   stopPortal();
   if (apUp) {
@@ -124,6 +133,12 @@ void netLoop() {
   const bool wantSta = cfg.staConfigured && cfg.staSsid[0] != '\0';
   const bool staNow = WiFi.status() == WL_CONNECTED;
   if (staNow && staUpSinceMs == 0) staUpSinceMs = millis();
+  // While connected, the "could not join" timer is held at zero, so it measures
+  // how long a connection has been LOST. It used to count from the first join
+  // attempt: on a board up for more than 20 s, any momentary drop - including
+  // the one when the access point is switched off - brought the access point
+  // straight back, and the two-minute stable timer started over, forever.
+  if (staNow) staStartedAtMs = millis();
 
   if (wantSta && !staNow) {
     const uint32_t now = millis();

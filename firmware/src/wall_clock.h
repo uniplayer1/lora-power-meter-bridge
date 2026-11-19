@@ -15,11 +15,11 @@ enum class ClockSource : uint8_t {
   Radio = 2,  // from the paired board
 };
 
-// Sets the time zone, and starts NTP when the board has a home network
-// configured. Call after the network is up (netBegin()).
+// Sets the time zone.
 void clockBegin();
 
-// Reports an NTP sync in the event log (the sync itself happens in lwIP).
+// Starts NTP once the home network is connected, and reports a sync in the
+// event log (the sync itself happens in lwIP).
 void clockLoop();
 
 bool clockValid();

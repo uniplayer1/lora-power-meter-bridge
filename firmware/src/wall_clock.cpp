@@ -5,6 +5,7 @@
 
 #include "app_config.h"
 #include "config.h"
+#include "net.h"
 
 namespace {
 
@@ -14,6 +15,7 @@ constexpr time_t kValidAfter = 1704067200;
 volatile ClockSource source = ClockSource::None;
 volatile uint32_t syncedAtMs = 0;
 volatile bool ntpJustSynced = false;
+bool ntpStarted = false;
 
 void onNtpSync(struct timeval*) {
   // Runs in the lwIP task: keep it to flags.
@@ -28,13 +30,6 @@ void onNtpSync(struct timeval*) {
 void clockBegin() {
   setenv("TZ", TIME_ZONE_POSIX, 1);
   tzset();
-  const DeviceConfig& cfg = configStore.get();
-  if (cfg.staConfigured && cfg.staSsid[0] != '\0') {
-    sntp_set_time_sync_notification_cb(onNtpSync);
-    // Also sets TZ; lwIP keeps retrying until the station is online and then
-    // re-syncs every hour on its own.
-    configTzTime(TIME_ZONE_POSIX, NTP_SERVER_1, NTP_SERVER_2);
-  }
 }
 
 bool clockValid() { return source != ClockSource::None && time(nullptr) > kValidAfter; }
@@ -50,6 +45,16 @@ const char* clockSourceName() {
 }
 
 void clockLoop() {
+  // NTP starts the first time the station is online - not at boot: a board
+  // that gets its home network during setup has none at boot, and used to
+  // never ask for the time until it was restarted. Once started, lwIP
+  // re-syncs every hour by itself.
+  if (!ntpStarted && netStaUp()) {
+    ntpStarted = true;
+    sntp_set_time_sync_notification_cb(onNtpSync);
+    configTzTime(TIME_ZONE_POSIX, NTP_SERVER_1, NTP_SERVER_2);
+    logEvent("clock: asking %s for the time", NTP_SERVER_1);
+  }
   if (!ntpJustSynced) return;
   ntpJustSynced = false;
   char text[24];

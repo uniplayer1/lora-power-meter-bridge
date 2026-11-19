@@ -23,6 +23,9 @@ void netApplyApSettings();
 
 bool netStaUp();
 bool netApUp();
+// Seconds until a gateway switches its own access point off (it does so once
+// the home network has been connected for a while), or -1 when it will not.
+int32_t netApOffInS();
 bool netInSetupMode();  // AP up because the device is unprovisioned or STA failed
 bool netPortalActive();
 String netIp();

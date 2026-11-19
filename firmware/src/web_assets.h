@@ -932,7 +932,16 @@ function render() {
   set('w-ssid', w.sta_ssid || '–');
   set('w-ip', w.connected ? w.ip : '–');
   set('w-rssi', (w.connected && w.rssi) ? (w.rssi + ' dBm') : '–');
-  set('w-ap', w.ap_up ? ('an · ' + (w.ap_ssid || '?') + ' · ' + (w.clients || 0) + ' verbunden') : 'aus');
+  // Why it is on matters as much as that it is: on the gateway it switches
+  // itself off once the home network has been stable for two minutes, and
+  // comes back only when that network is lost.
+  let apWhy = '';
+  if (w.ap_up && w.ap_off_in_s !== undefined && w.ap_off_in_s >= 0) {
+    apWhy = w.ap_off_in_s > 0 ? ' · schaltet sich in ' + w.ap_off_in_s + ' s ab' : ' · schaltet sich gleich ab';
+  } else if (w.ap_up && isGateway && w.configured && !w.connected && !w.keep_ap) {
+    apWhy = ' · Ersatzzugang, weil das Heim-WLAN nicht erreichbar ist';
+  }
+  set('w-ap', w.ap_up ? ('an · ' + (w.ap_ssid || '?') + ' · ' + (w.clients || 0) + ' verbunden' + apWhy) : 'aus');
   set('w-diag', 'Modus ' + w.mode + ' · ' + w.state + (w.portal ? ' · Einrichtungsportal aktiv' : ''));
   const wifiWarn = $('wifi-warn');
   if (wifiWarn) {
