@@ -43,6 +43,9 @@ enum class PacketType : uint8_t {
   // the other's id, and the initiator stays "unpaired" forever while packets
   // still flow - which looks exactly like a link that cannot be established.
   PairConfirm = 9,
+  // node -> gateway: the node's own airtime, memory, reception and read-head
+  // counters (NodeStatus), every few minutes.
+  NodeReport = 10,
 };
 
 struct Packet {

@@ -70,8 +70,11 @@ The basement board does **not** need your home WiFi.
      packages: !include_dir_named packages
    ```
 
-4. Restart Home Assistant. Entities appear: import/export energy, power (and per
-   phase), link quality, telegram age and diagnostics.
+4. Restart Home Assistant. Entities appear: the readings named *Stromzähler …*
+   (import/export energy, power and per phase), the basement board's own status
+   as *Keller …* and the flat board's as *Wohnung …*. Over MQTT or with the
+   integration they are grouped into two devices, *Stromzähler Keller* and the
+   gateway.
 5. Optional: download the **Dashboard-Karte** too and paste it as a new Lovelace
    card. If you run an MQTT broker, enter it on the same tab instead; the
    entities then appear without any file.

@@ -46,6 +46,7 @@ uint32_t lastSendMs = 0;
 uint32_t lastTimeSyncMs = 0;
 uint32_t lastTimeSyncTryMs = 0;
 bool timePeerWasOnline = false;
+uint32_t nodeReportDueMs = 0;
 uint32_t lastIdentityMs = 0;
 
 // LED: solid when everything works, slow blink without a peer, fast blink when
@@ -95,6 +96,16 @@ void handleInbound(const core::Packet& packet, uint32_t now) {
 
     case core::PacketType::Status:
       break;  // liveness only; the link layer already tracked it
+
+    case core::PacketType::NodeReport: {
+      core::NodeStatus report;
+      if (!core::unpackNodeStatus(packet.payload, packet.payloadLen, report)) {
+        logEvent("status report from %04X malformed", packet.src);
+        break;
+      }
+      radioLink.notePeerReport(report, packet.uptimeS, millis());
+      break;
+    }
 
     case core::PacketType::TimeSync: {
       // Seconds and milliseconds since 1970 (UTC), taken just before the frame
@@ -178,6 +189,57 @@ void timeSyncTick(uint32_t now) {
   }
 }
 
+// The meter node tells the gateway how it is doing: its airtime, memory,
+// reception and read-head counters. Shortly after the link comes up, then every
+// few minutes. Sealed like a reading, so only the paired gateway reads it.
+void nodeReportTick(uint32_t now) {
+  if (!configStore.roleIs(DeviceRole::Meter)) return;
+  const LinkStats& link = radioLink.stats();
+  if (!link.peerOnline || !radioLink.encryptionEnabled()) {
+    nodeReportDueMs = 0;
+    return;
+  }
+  if (nodeReportDueMs == 0) {
+    // The link just came up: report soon, but not on top of the pairing frames.
+    nodeReportDueMs = now + NODE_REPORT_FIRST_DELAY_MS;
+    if (nodeReportDueMs == 0) nodeReportDueMs = 1;
+  }
+  if (static_cast<int32_t>(now - nodeReportDueMs) < 0) return;
+
+  core::NodeStatus report;
+  report.airtimeUsedDs = core::saturate16(radioLink.budget().usedMs(now) / 100u);
+  report.txBlocked = core::saturate16(link.txBlocked);
+  report.heapFreeKb = core::saturate16(ESP.getFreeHeap() / 1024u);
+  report.heapMinKb = core::saturate16(ESP.getMinFreeHeap() / 1024u);
+  report.rssi = static_cast<int8_t>(link.peerRssi < -128 ? -128 : (link.peerRssi > 127 ? 127 : link.peerRssi));
+  const float snrQ = link.peerSnr * 4.0f;
+  report.snrQuarterDb = static_cast<int8_t>(snrQ < -128.0f ? -128 : (snrQ > 127.0f ? 127 : snrQ));
+  const MeterStats& meter = meterReader.stats();
+  report.telegrams = meter.telegrams;
+  report.telegramErrors = core::saturate16(meter.crcErrors + meter.parseErrors);
+  report.telegramAgeS = meter.lastTelegramAtMs
+                            ? core::saturate16(ageSeconds(now, meter.lastTelegramAtMs))
+                            : core::NodeStatus::kAgeNever;
+  uint8_t flags = 0;
+  if (meterReader.protocolResolved()) flags |= core::NodeStatus::kMeterResolved;
+  if (meter.activeProtocol == MeterProtocol::Sml) flags |= core::NodeStatus::kMeterSml;
+  if (meter.activeProtocol == MeterProtocol::D0) flags |= core::NodeStatus::kMeterD0;
+  if (meter.invertedNow) flags |= core::NodeStatus::kMeterInverted;
+  if (meter.simulating) flags |= core::NodeStatus::kMeterSimulating;
+  report.meterFlags = flags;
+  report.rxPin = meterReader.rxPin();
+  report.bytesSeen = meter.bytesSeen;
+
+  uint8_t payload[core::NodeStatus::kWireSize];
+  const size_t len = core::packNodeStatus(report, payload, sizeof(payload));
+  const bool sent = len > 0 && radioLink.send(core::PacketType::NodeReport, payload,
+                                              static_cast<uint8_t>(len), configStore.get().peerShortId,
+                                              false);
+  // Refused (airtime budget or radio): try again in half a minute.
+  nodeReportDueMs = now + (sent ? NODE_REPORT_INTERVAL_MS : TIME_SYNC_RETRY_MS);
+  if (nodeReportDueMs == 0) nodeReportDueMs = 1;
+}
+
 void logIdentity() {
   const DeviceConfig& cfg = configStore.get();
   logEvent("%s role=%s name='%s' mac=%s code=%s ap=%s", FW_ID,
@@ -238,6 +300,7 @@ void loop() {
   schedulerTick(now);
   clockLoop();
   timeSyncTick(millis());
+  nodeReportTick(millis());
   updateLed(now);
 
   // Identity line: makes the board findable on the serial console and proves to

@@ -20,12 +20,21 @@ zeroconf service info helper).
 
 ## What it creates
 
-One device with a "Bezug"/"Einspeisung" energy pair (kWh, `total_increasing`,
-usable in the energy dashboard), current power overall and per phase, the age of
-the last reading, link quality (RSSI/SNR/age), the share of the legal transmit
-budget used, telegram and checksum-error counters, uptime and free memory — plus
-two binary sensors: *Keller-Link* (is the basement board answering?) and
-*Messung gültig*.
+Two devices, so it is clear which board a value belongs to:
+
+- **Stromzähler Keller** (linked to the gateway): the "Bezug"/"Einspeisung"
+  energy pair (kWh, `total_increasing`, usable in the energy dashboard), current
+  power overall and per phase, *Messung gültig*, and as diagnostics the age of
+  the last reading, telegram and checksum-error counters plus the meter node's
+  own report: share of its airtime budget used, held-back sends, how it hears
+  the gateway, free memory, uptime, bytes from the read head and the age of the
+  report.
+- **The gateway** (named as on its setup page): its own airtime budget,
+  reception of the meter node (RSSI/SNR, age of the last packet), uptime, free
+  memory and *Funkverbindung zum Keller*.
+
+The unique ids of entities that existed before the split are unchanged, so
+entity ids and the energy history stay.
 
 ## How this differs from the other two paths
 

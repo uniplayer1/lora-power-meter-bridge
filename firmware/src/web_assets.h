@@ -402,7 +402,7 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
         <div class="rows">
           <div class="row"><span>Gegenstelle</span><span id="l-peer">–</span></div>
           <div class="row"><span>Signal (RSSI / SNR)</span><span id="l-radio">–</span></div>
-          <div class="row"><span>Sendezeit (1 h)</span><span id="l-duty">–</span></div>
+          <div class="row"><span>Sendezeit-Budget (1 h)</span><span id="l-duty">–</span></div>
           <div class="row"><span>Bestätigungen</span><span id="l-ack">–</span></div>
         </div>
       </div>
@@ -488,6 +488,19 @@ static const char kAppHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
           <button class="ghost" data-act="unpair" data-confirm="Kopplung wirklich lösen?">Kopplung lösen</button>
         </div>
         <p class="hint" id="lk-timeout">Beide Geräte müssen in Reichweite sein; die Kopplung dauert bis zu einer Minute.</p>
+      </div>
+
+      <div class="card" data-only="gateway"><h3>Keller-Gerät</h3>
+        <div class="rows">
+          <div class="row"><span>Statusbericht</span><span id="ns-age">–</span></div>
+          <div class="row"><span>Sendezeit-Budget (1 h)</span><span id="ns-duty">–</span></div>
+          <div class="row"><span>Empfang vom Gateway</span><span id="ns-rx">–</span></div>
+          <div class="row"><span>Lesekopf</span><span id="ns-meter">–</span></div>
+          <div class="row"><span>Freier Speicher</span><span id="ns-heap">–</span></div>
+          <div class="row"><span>Laufzeit</span><span id="ns-up">–</span></div>
+        </div>
+        <p class="hint">Meldet das Keller-Gerät alle 5 Minuten selbst über Funk. Die Werte darüber und unter
+          „Übersicht“ sind die dieses Geräts.</p>
       </div>
 
       <div class="card"><h3>Funkparameter</h3>
@@ -832,6 +845,25 @@ function render() {
   set('l-peer', l.peer ? ('online' + (l.peer_id && l.peer_id !== '0' ? ' · ' + l.peer_id.toUpperCase() : '')) : 'offline');
   set('l-radio', l.peer ? (l.rssi + ' dBm / ' + num(l.snr, 1) + ' dB') : '–');
   set('l-duty', num(l.duty_pct, 1) + ' % von ' + (l.budget_ms / 1000) + ' s');
+
+  // The Keller board's own report (gateway only).
+  const ns = state.peer_status;
+  if (ns) {
+    set('ns-age', ago(ns.age));
+    set('ns-duty', num(ns.duty_pct, 1) + ' % (' + num(ns.airtime_s, 1) + ' s)' +
+      (ns.blocked ? ' · ' + ns.blocked + ' zurückgehalten' : ''));
+    set('ns-rx', ns.rssi + ' dBm · SNR ' + num(ns.snr, 1) + ' dB');
+    set('ns-meter', (ns.simulating ? 'Simulator · ' : '') +
+      (ns.meter_resolved ? (ns.meter_protocol || '?').toUpperCase() : 'sucht') + ' · GPIO' + ns.rx_pin +
+      ' · ' + ns.bytes + ' Bytes · ' + ns.telegrams + ' Telegramme' +
+      (ns.telegram_errors ? ', ' + ns.telegram_errors + ' Fehler' : '') +
+      (ns.telegram_age !== null && ns.telegram_age !== undefined ? ' · letztes ' + ago(ns.telegram_age) : ''));
+    set('ns-heap', Math.round(ns.heap / 1024) + ' kB · Tiefstwert ' + Math.round(ns.heap_min / 1024) + ' kB');
+    set('ns-up', fmtDuration(ns.uptime));
+  } else {
+    set('ns-age', l.peer ? 'noch keiner – kommt kurz nach dem Verbindungsaufbau' : 'keiner – keine Funkverbindung');
+    ['ns-duty', 'ns-rx', 'ns-meter', 'ns-heap', 'ns-up'].forEach((id) => set(id, '–'));
+  }
   set('l-ack', l.acks + ' ok · ' + l.missed + ' verloren');
 
   // meter

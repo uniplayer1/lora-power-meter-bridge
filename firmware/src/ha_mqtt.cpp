@@ -16,50 +16,63 @@ PubSubClient client(networkClient);
 // One retained state topic feeds every entity, so a discovery config only has
 // to point at a JSON key. Short keys keep the payloads small - they are
 // published on every meter update.
+// Which device an entity belongs to in Home Assistant. Home Assistant puts the
+// device name in front of every entity name, so with everything on the gateway
+// device the gateway's own airtime read "Wohnung Stromzähler Sendezeit" - as if
+// it were the meter's. The readings and the meter node's report now live on a
+// device of their own; the unique ids did not change, so entity ids and the
+// energy history stay where they were.
+enum class Owner : uint8_t {
+  Gateway,  // the board this runs on (in the flat)
+  Node,     // the meter node in the basement: its readings and its report
+};
+
 struct Entity {
   const char* component;    // sensor | binary_sensor
-  const char* object;       // object id inside the discovery topic
-  const char* name;         // what Home Assistant shows
+  const char* object;       // object id inside the discovery topic (= unique id suffix)
+  const char* name;         // shown after the device name
   const char* valueTemplate;
   const char* unit;
   const char* deviceClass;
   const char* stateClass;
+  Owner owner;
+  bool fromReport;          // only available once the node has reported
+  bool diagnostic;          // shown under "Diagnose" rather than as a main value
 };
 
+constexpr Owner G = Owner::Gateway;
+constexpr Owner N = Owner::Node;
+
 const Entity kEntities[] = {
-    {"sensor", "import", "Stromzähler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
-     "total_increasing"},
-    {"sensor", "export", "Stromzähler Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh",
-     "energy", "total_increasing"},
-    {"sensor", "power", "Stromzähler Leistung", "{{ value_json.meter.power_w }}", "W", "power",
-     "measurement"},
-    {"sensor", "power_l1", "Stromzähler Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power",
-     "measurement"},
-    {"sensor", "power_l2", "Stromzähler Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power",
-     "measurement"},
-    {"sensor", "power_l3", "Stromzähler Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power",
-     "measurement"},
-    {"sensor", "meter_age", "Stromzähler Alter der Messung", "{{ value_json.meter.age }}", "s",
-     "duration", "measurement"},
-    {"sensor", "telegrams", "Stromzähler Telegramme", "{{ value_json.meter.telegrams }}", "", "",
-     "total_increasing"},
-    {"sensor", "crc_errors", "Stromzähler Prüfsummenfehler", "{{ value_json.meter.crc_errors }}",
-     "", "", "total_increasing"},
-    {"sensor", "rssi", "Stromzähler Link RSSI", "{{ value_json.link.rssi }}", "dBm",
-     "signal_strength", "measurement"},
-    {"sensor", "snr", "Stromzähler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement"},
-    {"sensor", "link_age", "Stromzähler Link Alter", "{{ value_json.link.age }}", "s", "duration",
-     "measurement"},
-    {"sensor", "duty", "Stromzähler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "",
-     "measurement"},
-    {"sensor", "uptime", "Stromzähler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
-     "total_increasing"},
-    {"sensor", "heap", "Stromzähler freier Speicher", "{{ value_json.device.heap }}", "B", "",
-     "measurement"},
-    {"binary_sensor", "peer", "Stromzähler Keller-Link", "{{ value_json.link.peer }}", "", "connectivity",
-     ""},
-    {"binary_sensor", "meter_valid", "Stromzähler Messung gültig", "{{ value_json.meter.valid }}",
-     "", "connectivity", ""},
+    // The meter, read in the basement and received over the link.
+    {"sensor", "import", "Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy", "total_increasing", N, false, false},
+    {"sensor", "export", "Einspeisung", "{{ value_json.meter.export_kwh }}", "kWh", "energy", "total_increasing", N, false, false},
+    {"sensor", "power", "Leistung", "{{ value_json.meter.power_w }}", "W", "power", "measurement", N, false, false},
+    {"sensor", "power_l1", "Leistung L1", "{{ value_json.meter.l1_w }}", "W", "power", "measurement", N, false, false},
+    {"sensor", "power_l2", "Leistung L2", "{{ value_json.meter.l2_w }}", "W", "power", "measurement", N, false, false},
+    {"sensor", "power_l3", "Leistung L3", "{{ value_json.meter.l3_w }}", "W", "power", "measurement", N, false, false},
+    {"sensor", "meter_age", "Alter der Messung", "{{ value_json.meter.age }}", "s", "duration", "measurement", N, false, true},
+    {"sensor", "telegrams", "Telegramme", "{{ value_json.meter.telegrams }}", "", "", "total_increasing", N, false, true},
+    {"sensor", "crc_errors", "Prüfsummenfehler", "{{ value_json.meter.crc_errors }}", "", "", "total_increasing", N, false, true},
+    {"binary_sensor", "meter_valid", "Messung gültig", "{{ value_json.meter.valid }}", "", "connectivity", "", N, false, false},
+    // The meter node's own status, from its report every few minutes.
+    {"sensor", "node_duty", "Sendezeit-Budget genutzt", "{{ value_json.peer_status.duty_pct }}", "%", "", "measurement", N, true, true},
+    {"sensor", "node_blocked", "Zurückgehaltene Sendungen", "{{ value_json.peer_status.blocked }}", "", "", "measurement", N, true, true},
+    {"sensor", "node_rssi", "Empfang vom Gateway RSSI", "{{ value_json.peer_status.rssi }}", "dBm", "signal_strength", "measurement", N, true, true},
+    {"sensor", "node_snr", "Empfang vom Gateway SNR", "{{ value_json.peer_status.snr }}", "dB", "", "measurement", N, true, true},
+    {"sensor", "node_heap", "Freier Speicher", "{{ value_json.peer_status.heap }}", "B", "data_size", "measurement", N, true, true},
+    {"sensor", "node_heap_min", "Speicher-Tiefstwert", "{{ value_json.peer_status.heap_min }}", "B", "data_size", "measurement", N, true, true},
+    {"sensor", "node_uptime", "Laufzeit", "{{ value_json.peer_status.uptime }}", "s", "duration", "total_increasing", N, true, true},
+    {"sensor", "node_bytes", "Bytes vom Lesekopf", "{{ value_json.peer_status.bytes }}", "", "", "total_increasing", N, true, true},
+    {"sensor", "node_report_age", "Letzter Statusbericht", "{{ value_json.peer_status.age }}", "s", "duration", "measurement", N, true, true},
+    // This board (the gateway in the flat).
+    {"sensor", "duty", "Sendezeit-Budget genutzt", "{{ value_json.link.duty_pct }}", "%", "", "measurement", G, false, true},
+    {"sensor", "rssi", "Empfang vom Keller RSSI", "{{ value_json.link.rssi }}", "dBm", "signal_strength", "measurement", G, false, true},
+    {"sensor", "snr", "Empfang vom Keller SNR", "{{ value_json.link.snr }}", "dB", "", "measurement", G, false, true},
+    {"sensor", "link_age", "Letztes Paket vom Keller", "{{ value_json.link.age }}", "s", "duration", "measurement", G, false, true},
+    {"sensor", "uptime", "Laufzeit", "{{ value_json.device.uptime }}", "s", "duration", "total_increasing", G, false, true},
+    {"sensor", "heap", "Freier Speicher", "{{ value_json.device.heap }}", "B", "data_size", "measurement", G, false, true},
+    {"binary_sensor", "peer", "Funkverbindung zum Keller", "{{ value_json.link.peer }}", "", "connectivity", "", G, false, false},
 };
 
 String nodeId() {
@@ -81,17 +94,35 @@ String discoveryPayload(const DeviceConfig& cfg, const Entity& entity) {
   payload += escapeJson(String(entity.name));
   payload += "\",\"uniq_id\":\"" + nodeId() + "_" + entity.object + "\"";
   payload += ",\"stat_t\":\"" + base + "/state\"";
-  payload += ",\"avty_t\":\"" + base + "/status\"";
+  if (entity.fromReport) {
+    // Online AND a report has arrived: before the first report the values do
+    // not exist, and "unknown" says that better than a zero.
+    payload += ",\"avty\":[{\"t\":\"" + base + "/status\"},{\"t\":\"" + base +
+               "/state\",\"val_tpl\":\"{{ 'online' if value_json.peer_status else 'offline' }}\"}]";
+    payload += ",\"avty_mode\":\"all\"";
+  } else {
+    payload += ",\"avty_t\":\"" + base + "/status\"";
+  }
+  if (entity.diagnostic) payload += ",\"ent_cat\":\"diagnostic\"";
   payload += ",\"val_tpl\":\"" + String(entity.valueTemplate) + "\"";
   if (entity.unit[0]) payload += ",\"unit_of_meas\":\"" + String(entity.unit) + "\"";
   if (entity.deviceClass[0]) payload += ",\"dev_cla\":\"" + String(entity.deviceClass) + "\"";
   if (entity.stateClass[0]) payload += ",\"stat_cla\":\"" + String(entity.stateClass) + "\"";
   if (strcmp(entity.component, "binary_sensor") == 0) payload += ",\"pl_on\":\"True\",\"pl_off\":\"False\"";
   payload += ",\"dev\":{";
-  payload += "\"ids\":[\"" + nodeId() + "\"],";
-  payload += "\"name\":\"" + escapeJson(cfg.deviceName[0] ? String(cfg.deviceName) : String("Power Meter")) + "\",";
-  payload += "\"mf\":\"LilyGo\",\"mdl\":\"T3-S3 power meter link\",\"sw\":\"" FW_ID "\",";
-  payload += "\"cu\":\"http://" + WiFi.localIP().toString() + "/\"";
+  if (entity.owner == Owner::Node) {
+    // Identified through the gateway, so it stays the same device when the
+    // node is replaced and paired again.
+    payload += "\"ids\":[\"" + nodeId() + "_keller\"],";
+    payload += "\"name\":\"Stromzähler Keller\",";
+    payload += "\"mf\":\"LilyGo\",\"mdl\":\"T3-S3 Zähler-Funkmodul\",";
+    payload += "\"via_device\":\"" + nodeId() + "\"";
+  } else {
+    payload += "\"ids\":[\"" + nodeId() + "\"],";
+    payload += "\"name\":\"" + escapeJson(cfg.deviceName[0] ? String(cfg.deviceName) : String("Power Meter")) + "\",";
+    payload += "\"mf\":\"LilyGo\",\"mdl\":\"T3-S3 Gateway\",\"sw\":\"" FW_ID "\",";
+    payload += "\"cu\":\"http://" + WiFi.localIP().toString() + "/\"";
+  }
   payload += "}}";
   return payload;
 }

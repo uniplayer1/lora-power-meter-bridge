@@ -269,6 +269,7 @@ void RadioLink::clearPairing() {
   confirmsLeft_ = 0;
   stats_.peerOnline = false;
   stats_.lastPeerSeenMs = 0;
+  peerReportAtMs_ = 0;
   stats_.pairState = PairState::Unpaired;
   stats_.pairingActive = false;
   stats_.pairingResult[0] = '\0';
@@ -312,6 +313,7 @@ void RadioLink::markPaired(uint16_t peerId, uint32_t nowMs) {
     stats_.peerOnline = false;
     stats_.lastPeerSeenMs = 0;
     peerUptimeKnown_ = false;
+    peerReportAtMs_ = 0;  // a report from the previous peer is not this one's
   }
   heartbeatDueMs_ = nowMs + 1500;
   if (heartbeatDueMs_ == 0) heartbeatDueMs_ = 1;

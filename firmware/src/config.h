@@ -134,6 +134,11 @@ constexpr uint8_t kSparePin2 = 21;
 // under a second in that time; the sync costs about 70 ms of airtime.
 #define TIME_SYNC_INTERVAL_MS (6UL * 60UL * 60UL * 1000UL)
 #define TIME_SYNC_RETRY_MS (30UL * 1000UL)
+// The meter node reports its own status (airtime, memory, reception, read-head
+// counters) to the gateway this often, and once shortly after the link comes
+// up. 25 bytes sealed: about 1 s of airtime per hour.
+#define NODE_REPORT_INTERVAL_MS (5UL * 60UL * 1000UL)
+#define NODE_REPORT_FIRST_DELAY_MS (10UL * 1000UL)
 
 // ── Meter ────────────────────────────────────────────────────
 #define METER_SML_BAUD 9600

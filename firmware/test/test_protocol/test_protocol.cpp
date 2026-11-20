@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "meter_values.h"
+#include "node_status.h"
 #include "protocol.h"
 
 using namespace core;
@@ -178,4 +179,48 @@ TEST_CASE("a plaintext frame still decodes when a key is configured") {
   TEST_ASSERT_TRUE(decodePacket(wire, len, received, key));
   TEST_ASSERT_FALSE((received.flags & kFlagEncrypted) != 0);
   TEST_ASSERT_EQUAL_MEMORY(sent.payload, received.payload, sent.payloadLen);
+}
+
+TEST_CASE("the node status report survives the wire") {
+  NodeStatus in;
+  in.airtimeUsedDs = 213;  // 21.3 s
+  in.txBlocked = 2;
+  in.heapFreeKb = 141;
+  in.heapMinKb = 118;
+  in.rssi = -97;
+  in.snrQuarterDb = -14;  // -3.5 dB
+  in.telegrams = 123456;
+  in.telegramErrors = 7;
+  in.telegramAgeS = 1;
+  in.meterFlags = NodeStatus::kMeterResolved | NodeStatus::kMeterSml;
+  in.rxPin = 39;
+  in.bytesSeen = 78901234;
+
+  uint8_t wire[NodeStatus::kWireSize + 4];
+  TEST_ASSERT_EQUAL_UINT32(25, NodeStatus::kWireSize);
+  TEST_ASSERT_EQUAL_UINT32(NodeStatus::kWireSize, packNodeStatus(in, wire, sizeof(wire)));
+  // Fits a sealed frame with room to spare.
+  TEST_ASSERT_TRUE(NodeStatus::kWireSize <= kMaxPayload);
+
+  NodeStatus out;
+  TEST_ASSERT_TRUE(unpackNodeStatus(wire, NodeStatus::kWireSize, out));
+  TEST_ASSERT_EQUAL_UINT16(213, out.airtimeUsedDs);
+  TEST_ASSERT_EQUAL_UINT16(2, out.txBlocked);
+  TEST_ASSERT_EQUAL_UINT16(141, out.heapFreeKb);
+  TEST_ASSERT_EQUAL_UINT16(118, out.heapMinKb);
+  TEST_ASSERT_EQUAL_INT8(-97, out.rssi);
+  TEST_ASSERT_EQUAL_INT8(-14, out.snrQuarterDb);
+  TEST_ASSERT_EQUAL_UINT32(123456, out.telegrams);
+  TEST_ASSERT_EQUAL_UINT16(7, out.telegramErrors);
+  TEST_ASSERT_EQUAL_UINT16(1, out.telegramAgeS);
+  TEST_ASSERT_EQUAL_UINT8(NodeStatus::kMeterResolved | NodeStatus::kMeterSml, out.meterFlags);
+  TEST_ASSERT_EQUAL_UINT8(39, out.rxPin);
+  TEST_ASSERT_EQUAL_UINT32(78901234, out.bytesSeen);
+
+  // Too short, or a layout version this build does not know: refused.
+  TEST_ASSERT_FALSE(unpackNodeStatus(wire, NodeStatus::kWireSize - 1, out));
+  wire[0] = NodeStatus::kVersion + 1;
+  TEST_ASSERT_FALSE(unpackNodeStatus(wire, NodeStatus::kWireSize, out));
+  // Counters that do not fit two bytes saturate instead of wrapping.
+  TEST_ASSERT_EQUAL_UINT16(0xFFFF, saturate16(70000));
 }

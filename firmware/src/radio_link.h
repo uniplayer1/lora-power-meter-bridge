@@ -12,6 +12,7 @@
 #include "config.h"
 #include "duty_cycle.h"
 #include "meter_values.h"
+#include "node_status.h"
 #include "protocol.h"
 
 enum class PairState : uint8_t {
@@ -109,6 +110,18 @@ class RadioLink {
   bool paired() const;
   // True once after the peer restarted (its uptime went backwards), so whatever
   // state it lost - the wall-clock time, for one - can be sent again.
+  // The last status report from the peer (meter node -> gateway), with the
+  // millis() it arrived and the peer's uptime at that moment.
+  void notePeerReport(const core::NodeStatus& report, uint32_t peerUptimeS, uint32_t nowMs) {
+    peerReport_ = report;
+    peerReportUptimeS_ = peerUptimeS;
+    peerReportAtMs_ = nowMs ? nowMs : 1;
+  }
+  bool hasPeerReport() const { return peerReportAtMs_ != 0; }
+  const core::NodeStatus& peerReport() const { return peerReport_; }
+  uint32_t peerReportAtMs() const { return peerReportAtMs_; }
+  uint32_t peerReportUptimeS() const { return peerReportUptimeS_; }
+
   bool takePeerRestarted() {
     const bool restarted = peerRestarted_;
     peerRestarted_ = false;
@@ -183,6 +196,9 @@ class RadioLink {
   uint32_t peerUptimeS_ = 0;
   bool peerUptimeKnown_ = false;
   bool peerRestarted_ = false;
+  core::NodeStatus peerReport_;
+  uint32_t peerReportAtMs_ = 0;
+  uint32_t peerReportUptimeS_ = 0;
   // The confirmation closes the handshake and is the one frame whose loss
   // leaves the two ends disagreeing, so it is repeated a few times.
   uint8_t confirmsLeft_ = 0;

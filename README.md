@@ -155,7 +155,16 @@ link    radio, peer, paired, net, rssi, snr, age, encrypted, duty_pct, tx, rx,
         acks, missed, blocked, airtime_ms, budget_ms, pair_state, check_code
 meter   protocol, polarity, valid, age, import_kwh, export_kwh, power_w,
         l1_w/l2_w/l3_w, telegrams, crc_errors, parse_errors, bytes, ...
+peer_status  (gateway; null until the meter node has reported) age, duty_pct,
+        airtime_s, blocked, uptime, heap, heap_min, rssi, snr, telegrams,
+        telegram_errors, telegram_age, meter_protocol, meter_resolved,
+        inverted, simulating, rx_pin, bytes
 ```
+
+`link`, `device` and the budget figures are always the board that answers. The
+meter node reports its own airtime, memory, reception and read-head counters to
+the gateway every 5 minutes (and shortly after the link comes up); that report
+is `peer_status`.
 
 `*` filled only for clients on the device's own access point.
 
@@ -169,9 +178,13 @@ Other endpoints: `/api/state` (same document, used by the page), `/api/scan`,
 Optional, off until a broker is entered. It is the zero-file path: REST has no
 discovery, so it always needs a package file copied in. Discovery configs go to
 `<prefix>/<component>/lilygo_power_<id>/<object>/config` (retained), state to
-`<base>/state`, availability to `<base>/status`. 17 entities: energy in/out,
-power total and per phase, meter age, telegrams, CRC errors, RSSI, SNR, link age,
-duty cycle, uptime, free heap, peer link and measurement validity.
+`<base>/state`, availability to `<base>/status`. 26 entities on two devices:
+*Stromzähler Keller* has the readings (energy in/out, power total and per
+phase, measurement validity) and the meter node's own diagnostics from its
+report (airtime budget, held-back sends, reception, memory, uptime, read-head
+bytes, report age); the gateway device has its own airtime budget, reception,
+link age, uptime, memory and the radio-link state. The unique ids of the
+entities that existed before the split did not change.
 
 ### Home Assistant
 

@@ -554,6 +554,39 @@ bool buildStateJson(String& out, const RadioLink& linkRef, const MeterReader& me
 
   // The OLED page counter, so the web UI can drive it and report the raw BOOT
   // button level - that is what tells a stuck button apart from dead firmware.
+  // The meter node's own status, as last reported over the link (gateway only;
+  // null until a report arrived). Its airtime, memory and reception are not
+  // the gateway's - Home Assistant shows them on a device of their own.
+  if (link->hasPeerReport()) {
+    const core::NodeStatus& r = link->peerReport();
+    const uint32_t age = ageSeconds(now, link->peerReportAtMs());
+    const float budgetDs = LORA_DUTY_BUDGET_MS / 100.0f;
+    j += "\"peer_status\":{";
+    j += "\"age\":" + String(age);
+    j += ",\"duty_pct\":" + String(r.airtimeUsedDs * 100.0f / budgetDs, 1);
+    j += ",\"airtime_s\":" + String(r.airtimeUsedDs / 10.0f, 1);
+    j += ",\"blocked\":" + String(r.txBlocked);
+    j += ",\"uptime\":" + String(link->peerReportUptimeS() + age);
+    j += ",\"heap\":" + String(static_cast<uint32_t>(r.heapFreeKb) * 1024u);
+    j += ",\"heap_min\":" + String(static_cast<uint32_t>(r.heapMinKb) * 1024u);
+    j += ",\"rssi\":" + String(r.rssi);
+    j += ",\"snr\":" + String(r.snrQuarterDb / 4.0f, 2);
+    j += ",\"telegrams\":" + String(r.telegrams);
+    j += ",\"telegram_errors\":" + String(r.telegramErrors);
+    j += ",\"telegram_age\":" +
+         (r.telegramAgeS == core::NodeStatus::kAgeNever ? String("null") : String(r.telegramAgeS + age));
+    j += ",\"meter_protocol\":\"";
+    j += (r.meterFlags & core::NodeStatus::kMeterSml) ? "sml" : ((r.meterFlags & core::NodeStatus::kMeterD0) ? "d0" : "");
+    j += "\",\"meter_resolved\":" + String((r.meterFlags & core::NodeStatus::kMeterResolved) ? "true" : "false");
+    j += ",\"inverted\":" + String((r.meterFlags & core::NodeStatus::kMeterInverted) ? "true" : "false");
+    j += ",\"simulating\":" + String((r.meterFlags & core::NodeStatus::kMeterSimulating) ? "true" : "false");
+    j += ",\"rx_pin\":" + String(r.rxPin);
+    j += ",\"bytes\":" + String(r.bytesSeen);
+    j += "},";
+  } else {
+    j += "\"peer_status\":null,";
+  }
+
   j += "\"oled\":{\"page\":" + String(displayUi.page() + 1) + ",\"pages\":" +
        String(DisplayUi::pageCount()) + ",\"button\":" +
        String(displayUi.buttonDown() ? "true" : "false") + "},";
@@ -1083,8 +1116,14 @@ String WebUi::buildHaPackage() const {
       "    timeout: 5\n"
       "    sensor:\n";
 
+  // Readings are available while the meter reading is valid; the Keller's
+  // report values once a report has arrived; the Wohnung's own values always.
+  static const char* const kWhenMeterValid = "{{ value_json.meter.valid }}";
+  static const char* const kWhenReported = "{{ value_json.peer_status is not none }}";
+  static const char* const kAlways = "";
   auto addSensor = [&](const char* object, const char* friendly, const char* template_,
-                       const char* unit, const char* deviceClass, const char* stateClass) {
+                       const char* unit, const char* deviceClass, const char* stateClass,
+                       const char* availability = kWhenMeterValid) {
     y += "      - name: \"";
     y += friendly;
     y += "\"\n        unique_id: lilygo_";
@@ -1109,7 +1148,11 @@ String WebUi::buildHaPackage() const {
       y += stateClass;
       y += "\n";
     }
-    y += "        availability: \"{{ value_json.meter.valid }}\"\n";
+    if (availability && *availability) {
+      y += "        availability: \"";
+      y += availability;
+      y += "\"\n";
+    }
   };
 
   addSensor("import", "Stromzähler Bezug", "{{ value_json.meter.import_kwh }}", "kWh", "energy",
@@ -1126,12 +1169,6 @@ String WebUi::buildHaPackage() const {
             "measurement");
   addSensor("age", "Stromzähler Alter der Messung", "{{ value_json.meter.age }}", "s", "duration",
             "measurement");
-  addSensor("rssi", "Stromzähler Link RSSI", "{{ value_json.link.rssi }}", "dBm", "signal_strength",
-            "measurement");
-  addSensor("snr", "Stromzähler Link SNR", "{{ value_json.link.snr }}", "dB", "", "measurement");
-  addSensor("duty", "Stromzähler Sendezeit", "{{ value_json.link.duty_pct }}", "%", "", "measurement");
-  addSensor("heap_block", "Stromzähler größter freier Block", "{{ value_json.device.heap_block }}",
-            "B", "", "measurement");
   // Framing trouble has its own counter: a telegram that never completes is a
   // different fault from one that arrives and does not decode.
   addSensor("overflow_errors", "Stromzähler Telegramme zu lang", "{{ value_json.meter.overflow_errors }}",
@@ -1142,16 +1179,50 @@ String WebUi::buildHaPackage() const {
             "total_increasing");
   addSensor("crc", "Stromzähler Prüfsummenfehler", "{{ value_json.meter.crc_errors }}", "", "",
             "total_increasing");
-  addSensor("heap", "Stromzähler freier Speicher", "{{ value_json.device.heap }}", "B", "", "measurement");
-  addSensor("uptime", "Stromzähler Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
-            "total_increasing");
+
+  // The Keller board, from its own status report every few minutes. Named by
+  // board: the airtime, memory and reception of the two boards are separate
+  // values, and one "Stromzähler Sendezeit" was the gateway's while it read
+  // like the meter's.
+  addSensor("node_duty", "Keller Sendezeit-Budget genutzt", "{{ value_json.peer_status.duty_pct }}", "%", "",
+            "measurement", kWhenReported);
+  addSensor("node_blocked", "Keller zurückgehaltene Sendungen", "{{ value_json.peer_status.blocked }}", "", "",
+            "measurement", kWhenReported);
+  addSensor("node_rssi", "Keller Empfang vom Gateway RSSI", "{{ value_json.peer_status.rssi }}", "dBm",
+            "signal_strength", "measurement", kWhenReported);
+  addSensor("node_snr", "Keller Empfang vom Gateway SNR", "{{ value_json.peer_status.snr }}", "dB", "",
+            "measurement", kWhenReported);
+  addSensor("node_heap", "Keller freier Speicher", "{{ value_json.peer_status.heap }}", "B", "data_size",
+            "measurement", kWhenReported);
+  addSensor("node_heap_min", "Keller Speicher-Tiefstwert", "{{ value_json.peer_status.heap_min }}", "B",
+            "data_size", "measurement", kWhenReported);
+  addSensor("node_uptime", "Keller Laufzeit", "{{ value_json.peer_status.uptime }}", "s", "duration",
+            "total_increasing", kWhenReported);
+  addSensor("node_bytes", "Keller Bytes vom Lesekopf", "{{ value_json.peer_status.bytes }}", "", "",
+            "total_increasing", kWhenReported);
+  addSensor("node_report_age", "Keller letzter Statusbericht", "{{ value_json.peer_status.age }}", "s",
+            "duration", "measurement", kWhenReported);
+
+  // The Wohnung board (this gateway).
+  addSensor("duty", "Wohnung Sendezeit-Budget genutzt", "{{ value_json.link.duty_pct }}", "%", "",
+            "measurement", kAlways);
+  addSensor("rssi", "Wohnung Empfang vom Keller RSSI", "{{ value_json.link.rssi }}", "dBm", "signal_strength",
+            "measurement", kAlways);
+  addSensor("snr", "Wohnung Empfang vom Keller SNR", "{{ value_json.link.snr }}", "dB", "", "measurement",
+            kAlways);
+  addSensor("heap", "Wohnung freier Speicher", "{{ value_json.device.heap }}", "B", "data_size", "measurement",
+            kAlways);
+  addSensor("heap_block", "Wohnung größter freier Block", "{{ value_json.device.heap_block }}", "B",
+            "data_size", "measurement", kAlways);
+  addSensor("uptime", "Wohnung Laufzeit", "{{ value_json.device.uptime }}", "s", "duration",
+            "total_increasing", kAlways);
 
   y += "\n    binary_sensor:\n";
-  y += "      - name: \"Stromzaehler Keller-Link\"\n";
+  y += "      - name: \"Wohnung Funkverbindung zum Keller\"\n";
   y += "        unique_id: lilygo_" + id + "_peer\n";
   y += "        value_template: \"{{ value_json.link.peer }}\"\n";
   y += "        device_class: connectivity\n";
-  y += "      - name: \"Stromzaehler Messung gueltig\"\n";
+  y += "      - name: \"Stromzähler Messung gültig\"\n";
   y += "        unique_id: lilygo_" + id + "_valid\n";
   y += "        value_template: \"{{ value_json.meter.valid }}\"\n";
   y += "        device_class: connectivity\n";
@@ -1160,30 +1231,51 @@ String WebUi::buildHaPackage() const {
 }
 
 String WebUi::buildHaCard() const {
-  const String id = String(configStore.shortId(), HEX);
-  (void)id;
+  // Entity ids as Home Assistant derives them from the names in the YAML
+  // package (umlauts become plain letters: "Stromzähler" -> "stromzahler").
+  // Entities created before a rename keep their old ids - on an older
+  // installation they may read stromzaehler_..., and the card needs adjusting.
   return String(
       "# Dashboard-Karte fuer Home Assistant (Lovelace, YAML-Modus)\n"
       "# Einfach als neue Karte im Raw-Konfigurationseditor einfuegen.\n"
+      "# Wurden die Entitaeten vor einer Umbenennung angelegt, behalten sie ihre\n"
+      "# alten IDs (z. B. sensor.stromzaehler_...): dann die IDs hier anpassen.\n"
       "type: vertical-stack\n"
       "cards:\n"
       "  - type: gauge\n"
-      "    entity: sensor.stromzaehler_leistung\n"
+      "    entity: sensor.stromzahler_leistung\n"
       "    name: Leistung\n"
       "    min: 0\n"
       "    max: 4000\n"
       "    needle: true\n"
       "  - type: glance\n"
       "    entities:\n"
-      "      - entity: sensor.stromzaehler_bezug\n"
-      "      - entity: sensor.stromzaehler_einspeisung\n"
-      "      - entity: binary_sensor.stromzaehler_keller_link\n"
+      "      - entity: sensor.stromzahler_bezug\n"
+      "        name: Bezug\n"
+      "      - entity: sensor.stromzahler_einspeisung\n"
+      "        name: Einspeisung\n"
+      "      - entity: binary_sensor.wohnung_funkverbindung_zum_keller\n"
+      "        name: Funk\n"
       "  - type: entities\n"
-      "    title: Verbindung\n"
+      "    title: Keller (Zaehler)\n"
       "    entities:\n"
-      "      - entity: sensor.stromzaehler_link_rssi\n"
-      "      - entity: sensor.stromzaehler_link_snr\n"
-      "      - entity: sensor.stromzaehler_alter_der_messung\n"
-      "      - entity: sensor.stromzaehler_sendezeit\n"
-      "      - entity: sensor.stromzaehler_pruefsummenfehler\n");
+      "      - entity: sensor.stromzahler_alter_der_messung\n"
+      "        name: Alter der Messung\n"
+      "      - entity: sensor.stromzahler_prufsummenfehler\n"
+      "        name: Pruefsummenfehler\n"
+      "      - entity: sensor.keller_sendezeit_budget_genutzt\n"
+      "        name: Sendezeit-Budget genutzt\n"
+      "      - entity: sensor.keller_empfang_vom_gateway_rssi\n"
+      "        name: Empfang vom Gateway\n"
+      "      - entity: sensor.keller_freier_speicher\n"
+      "        name: Freier Speicher\n"
+      "  - type: entities\n"
+      "    title: Wohnung (Gateway)\n"
+      "    entities:\n"
+      "      - entity: sensor.wohnung_sendezeit_budget_genutzt\n"
+      "        name: Sendezeit-Budget genutzt\n"
+      "      - entity: sensor.wohnung_empfang_vom_keller_rssi\n"
+      "        name: Empfang vom Keller\n"
+      "      - entity: sensor.wohnung_freier_speicher\n"
+      "        name: Freier Speicher\n");
 }
