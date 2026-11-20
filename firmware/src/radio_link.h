@@ -192,7 +192,6 @@ class RadioLink {
   uint32_t heartbeatDueMs_ = 0;
   // Last time the receiver handed up anything at all, for the stuck-receiver check.
   uint32_t lastRxIrqMs_ = 0;
-  uint32_t lastRxCheckMs_ = 0;
   uint16_t seq_ = 0;
   uint16_t awaitingAckSeq_ = 0;
   bool awaitingAck_ = false;

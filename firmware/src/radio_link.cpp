@@ -338,8 +338,10 @@ void RadioLink::checkReceiver(uint32_t nowMs) {
   // the modem left receive mode. Both are cheap to check every so often.
   if (!stats_.radioOk) return;
   if (!olderThan(nowMs, lastRxIrqMs_, RX_WATCHDOG_MS)) return;
-  if (!olderThan(nowMs, lastRxCheckMs_, RX_WATCHDOG_MS)) return;
-  lastRxCheckMs_ = nowMs;
+  // Restamped on every check, so the next one follows a watchdog period later
+  // and the stamp never grows old: compared as a signed difference, a stamp
+  // from more than 24.8 days ago would read as recent and the check would stop.
+  lastRxIrqMs_ = nowMs;
   const uint32_t irq = radio_.getIrqFlags();
   if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
     logEvent("radio: packet without interrupt - reading it");

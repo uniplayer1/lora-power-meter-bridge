@@ -27,7 +27,12 @@ class DutyCycleBudget {
  public:
   static constexpr uint32_t kDefaultWindowMs = 60u * 60u * 1000u;  // 1 hour
   static constexpr uint32_t kDefaultBudgetMs = 36u * 1000u;        // 1 % = 36 s
-  static constexpr size_t kBuckets = 60;
+  static constexpr size_t kBuckets = 60;  // spans per window
+  // One slot more than spans per window: the span cut short by the millis()
+  // wrap (2^32 ms is not a whole number of spans) means an hour across the wrap
+  // touches 61 span starts, and with 60 slots the oldest still inside the
+  // window was overwritten.
+  static constexpr size_t kSlots = kBuckets + 1;
 
   DutyCycleBudget(uint32_t windowMs = kDefaultWindowMs,
                   uint32_t budgetMs = kDefaultBudgetMs);
@@ -66,7 +71,7 @@ class DutyCycleBudget {
 
   Bucket& bucketFor(uint32_t nowMs);
 
-  Bucket buckets_[kBuckets];
+  Bucket buckets_[kSlots];
   uint32_t windowMs_;
   uint32_t budgetMs_;
   uint32_t spanMs_;

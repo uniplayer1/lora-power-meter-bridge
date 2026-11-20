@@ -262,7 +262,9 @@ void loop() {
     }
   }
 
-  if (webUi.restartPending() && now >= webUi.restartAtMs()) {
+  // Compared as a signed difference: `now >= restartAt` misfires when the
+  // millis() wrap falls between the request and the deadline.
+  if (webUi.restartPending() && static_cast<int32_t>(now - webUi.restartAtMs()) >= 0) {
     Serial.println(F("restarting"));
     delay(120);
     ESP.restart();

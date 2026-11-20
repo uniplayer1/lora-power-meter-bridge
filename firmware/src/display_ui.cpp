@@ -1,6 +1,7 @@
 #include "display_ui.h"
 
 #include <Wire.h>
+#include <esp_timer.h>
 
 #include "config.h"
 #include "firmware_version.h"
@@ -73,7 +74,9 @@ void DisplayUi::drawHeader(const char* title) {
   // pages is named too - as "BOOT-Taste", not "BOOT": a bare "BOOT" in the corner
   // of the screen reads as a boot state, and it was mistaken for one on a board
   // that was running perfectly well.
-  if (millis() < 30000) {
+  // Uptime from the 64-bit timer: millis() < 30000 is also true for 30 s after
+  // every wrap, 49.7 days apart.
+  if (esp_timer_get_time() < 30000000LL) {
     snprintf(right, sizeof(right), "%u/%u BOOT-Taste", page_ + 1, kPageCount);
   } else {
     // The time of day next to the page counter, once the clock is set.

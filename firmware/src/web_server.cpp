@@ -135,7 +135,10 @@ void WebUi::loop() {
   }
 }
 
-void WebUi::requestRestart(uint32_t delayMs) { restartAtMs_ = millis() + delayMs; }
+void WebUi::requestRestart(uint32_t delayMs) {
+  restartAtMs_ = millis() + delayMs;
+  if (restartAtMs_ == 0) restartAtMs_ = 1;  // 0 means "none pending"
+}
 
 bool WebUi::isApClient() {
   if (!netApUp()) return false;

@@ -15,7 +15,7 @@ void DutyCycleBudget::configure(uint32_t windowMs, uint32_t budgetMs) {
 }
 
 void DutyCycleBudget::reset() {
-  for (size_t i = 0; i < kBuckets; ++i) {
+  for (size_t i = 0; i < kSlots; ++i) {
     buckets_[i].at = 0;
     buckets_[i].ms = 0;
     buckets_[i].used = false;
@@ -26,22 +26,33 @@ void DutyCycleBudget::reset() {
 }
 
 DutyCycleBudget::Bucket& DutyCycleBudget::bucketFor(uint32_t nowMs) {
-  // The index recurs once per window, so a bucket holding a different span
-  // start is by definition a full window old and safe to reuse.
-  const size_t index = static_cast<size_t>((nowMs / spanMs_) % kBuckets);
-  Bucket& bucket = buckets_[index];
+  // Found by its span start, not by an index computed from the time: 2^32 ms is
+  // not a whole number of spans, so an index sequence restarts at the millis()
+  // wrap and ran into buckets a minute or two old - which were cleared while
+  // their airtime was still inside the window. A bucket is only reused once it
+  // has left the window; with one slot more than spans per window, one always
+  // has, also across the wrap.
   const uint32_t spanStart = nowMs - (nowMs % spanMs_);
-  if (!bucket.used || bucket.at != spanStart) {
-    bucket.at = spanStart;
-    bucket.ms = 0;
-    bucket.used = true;
+  Bucket* reuse = nullptr;
+  uint32_t reuseAge = 0;
+  for (size_t i = 0; i < kSlots; ++i) {
+    Bucket& bucket = buckets_[i];
+    if (bucket.used && bucket.at == spanStart) return bucket;
+    const uint32_t age = bucket.used ? nowMs - bucket.at : UINT32_MAX;
+    if (reuse == nullptr || age > reuseAge) {
+      reuse = &bucket;
+      reuseAge = age;
+    }
   }
-  return bucket;
+  reuse->at = spanStart;
+  reuse->ms = 0;
+  reuse->used = true;
+  return *reuse;
 }
 
 uint32_t DutyCycleBudget::usedMs(uint32_t nowMs) const {
   uint32_t used = 0;
-  for (size_t i = 0; i < kBuckets; ++i) {
+  for (size_t i = 0; i < kSlots; ++i) {
     if (!buckets_[i].used) continue;
     // Unsigned arithmetic also handles the millis() wrap correctly.
     if (nowMs - buckets_[i].at < windowMs_) used += buckets_[i].ms;
@@ -71,13 +82,13 @@ uint32_t DutyCycleBudget::waitFor(uint32_t nowMs, uint32_t airtimeMs) const {
   // Budget frees up as buckets leave the window: walk them oldest first and
   // return the moment enough has expired.
   const uint32_t needed = airtimeMs - remaining;
-  bool counted[kBuckets] = {false};
+  bool counted[kSlots] = {false};
   uint32_t freed = 0;
   uint32_t wait = 0;
 
-  for (size_t n = 0; n < kBuckets; ++n) {
+  for (size_t n = 0; n < kSlots; ++n) {
     int oldest = -1;
-    for (size_t i = 0; i < kBuckets; ++i) {
+    for (size_t i = 0; i < kSlots; ++i) {
       if (counted[i] || !buckets_[i].used) continue;
       if (nowMs - buckets_[i].at >= windowMs_) continue;
       if (oldest < 0 || buckets_[i].at < buckets_[oldest].at) oldest = static_cast<int>(i);

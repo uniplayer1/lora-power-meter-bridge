@@ -17,14 +17,24 @@
 
 #include <cstdint>
 
+// A stamp at most this far AHEAD of `now` is the stale-snapshot case above and
+// counts as age zero. Anything else is a real age: compared as a plain signed
+// difference, an age over 24.8 days (2^31 ms) read as negative, i.e. "just
+// now", so a meter silent for a month showed its last reading as fresh.
+constexpr uint32_t kStampAheadToleranceMs = 5UL * 60UL * 1000UL;
+
+inline uint32_t elapsedMs(uint32_t nowMs, uint32_t stampMs) {
+  const uint32_t delta = nowMs - stampMs;  // unsigned: correct across the wrap
+  return delta > 0u - kStampAheadToleranceMs ? 0u : delta;
+}
+
 // Seconds since `stampMs`, never negative.
 inline uint32_t ageSeconds(uint32_t nowMs, uint32_t stampMs) {
-  const int32_t delta = static_cast<int32_t>(nowMs - stampMs);
-  return delta > 0 ? static_cast<uint32_t>(delta / 1000) : 0;
+  return elapsedMs(nowMs, stampMs) / 1000u;
 }
 
 // True when `stampMs` is older than `limitMs`. With stampMs == 0 (never set)
 // this is true, so callers must check "have we ever seen it" separately.
 inline bool olderThan(uint32_t nowMs, uint32_t stampMs, uint32_t limitMs) {
-  return static_cast<int32_t>(nowMs - stampMs) > static_cast<int32_t>(limitMs);
+  return elapsedMs(nowMs, stampMs) > limitMs;
 }
