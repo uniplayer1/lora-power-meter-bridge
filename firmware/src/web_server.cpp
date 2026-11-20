@@ -1094,6 +1094,16 @@ void WebUi::handleHaCard() {
   server_.send(200, "text/yaml", buildHaCard());
 }
 
+// Availability of the REST sensors: readings while the meter reading is valid,
+// the Keller's report values once a report has arrived, the Wohnung's own
+// values always. File scope, because a lambda's default argument below cannot
+// name a local.
+namespace {
+const char* const kWhenMeterValid = "{{ value_json.meter.valid }}";
+const char* const kWhenReported = "{{ value_json.peer_status is not none }}";
+const char* const kAlways = "";
+}  // namespace
+
 String WebUi::buildHaPackage() const {
   const DeviceConfig& cfg = configStore.get();
   const String base = "http://" + netIp();
@@ -1116,11 +1126,6 @@ String WebUi::buildHaPackage() const {
       "    timeout: 5\n"
       "    sensor:\n";
 
-  // Readings are available while the meter reading is valid; the Keller's
-  // report values once a report has arrived; the Wohnung's own values always.
-  static const char* const kWhenMeterValid = "{{ value_json.meter.valid }}";
-  static const char* const kWhenReported = "{{ value_json.peer_status is not none }}";
-  static const char* const kAlways = "";
   auto addSensor = [&](const char* object, const char* friendly, const char* template_,
                        const char* unit, const char* deviceClass, const char* stateClass,
                        const char* availability = kWhenMeterValid) {
